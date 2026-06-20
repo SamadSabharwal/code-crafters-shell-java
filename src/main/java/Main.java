@@ -1,69 +1,108 @@
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class Main {
+    // Keep track of background processes to recycle job IDs
+    private static final Map<Integer, Process> activeJobs = new HashMap<>();
+
     public static void main(String[] args) throws Exception {
-        // Standard REPL loop for your shell
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         
         while (true) {
             System.out.print("$ ");
             String input = reader.readLine();
             
-            if (input == null) break; // Exit on EOF
+            if (input == null) break;
             input = input.trim();
             if (input.isEmpty()) continue;
 
-            // Check if the command is a pipeline
+            // 1. Check for background job operator '&'
+            boolean isBackground = false;
+            if (input.endsWith("&")) {
+                isBackground = true;
+                // Remove the '&' and any trailing spaces from the command string
+                input = input.substring(0, input.length() - 1).trim();
+            }
+
+            // 2. Route to appropriate executor
             if (input.contains("|")) {
-                executePipeline(input);
+                executePipeline(input, isBackground);
             } else {
-                // TODO: Your existing logic for single commands (cd, echo, exit, etc.)
-                System.out.println("Executing single command: " + input);
+                executeSingle(input, isBackground);
             }
         }
     }
 
-    private static void executePipeline(String input) {
+    private static void executeSingle(String input, boolean isBackground) {
+        // TODO: Handle your built-in commands (cd, exit, echo, type) here before ProcessBuilder
+        // if (input.startsWith("cd ")) { ... return; }
+        
         try {
-            // Split the input into separate commands based on the pipe character
-            // Note: If you implemented quote handling in previous stages, you should use 
-            // your custom parser here instead of simple string splitting to avoid splitting 
-            // on pipes inside quotes (e.g. echo "a | b").
+            // Split by spaces (assuming you aren't using a custom quote tokenizer yet)
+            String[] cmdArgs = input.split(" +");
+            ProcessBuilder pb = new ProcessBuilder(cmdArgs);
+            pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+
+            Process process = pb.start();
+
+            if (isBackground) {
+                int jobId = getNextJobId();
+                activeJobs.put(jobId, process);
+                System.out.println("[" + jobId + "] " + process.pid());
+            } else {
+                // Only wait if it's NOT a background job
+                process.waitFor();
+            }
+        } catch (Exception e) {
+            System.out.println("Error executing command: " + e.getMessage());
+        }
+    }
+
+    private static void executePipeline(String input, boolean isBackground) {
+        try {
             String[] rawCommands = input.split("\\|");
-            
             List<ProcessBuilder> builders = new ArrayList<>();
 
             for (String rawCmd : rawCommands) {
-                // Split each command by spaces to get the executable and arguments
                 String[] cmdArgs = rawCmd.trim().split(" +");
                 ProcessBuilder pb = new ProcessBuilder(cmdArgs);
+                pb.redirectError(ProcessBuilder.Redirect.INHERIT);
                 builders.add(pb);
             }
 
-            // The output of the final command in the pipeline needs to print to the shell's stdout
-            ProcessBuilder lastBuilder = builders.get(builders.size() - 1);
-            lastBuilder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+            builders.get(builders.size() - 1).redirectOutput(ProcessBuilder.Redirect.INHERIT);
             
-            // Optionally redirect stderr for all processes so errors show up in the console
-            for (ProcessBuilder pb : builders) {
-                pb.redirectError(ProcessBuilder.Redirect.INHERIT);
-            }
-
-            // Java 9+ native pipeline execution
-            // This connects the stdout of builders.get(0) to stdin of builders.get(1), etc.
             List<Process> processes = ProcessBuilder.startPipeline(builders);
-
-            // Wait ONLY for the last process in the pipeline to complete.
-            // For example, in `tail -f file | head -n 5`, `head` will finish after 5 lines.
-            // Once `head` exits, the OS pipe breaks, which sends a SIGPIPE to `tail` and closes it.
             Process lastProcess = processes.get(processes.size() - 1);
-            lastProcess.waitFor();
+
+            if (isBackground) {
+                int jobId = getNextJobId();
+                // For pipelines, we track the final process in the chain
+                activeJobs.put(jobId, lastProcess);
+                System.out.println("[" + jobId + "] " + lastProcess.pid());
+            } else {
+                lastProcess.waitFor();
+            }
 
         } catch (Exception e) {
             System.out.println("Error executing pipeline: " + e.getMessage());
         }
+    }
+
+    /**
+     * Finds the lowest available integer for a job ID.
+     * If a process mapped to an ID is no longer alive, its ID is recycled.
+     */
+    private static int getNextJobId() {
+        int id = 1;
+        while (activeJobs.containsKey(id) && activeJobs.get(id).isAlive()) {
+            id++;
+        }
+        return id;
     }
 }
