@@ -163,6 +163,15 @@ public class Main {
         }
     }
 
+    // Get the next available job number (recycle numbers)
+    private static int getNextJobNumber() {
+        int jobNum = 1;
+        while (backgroundJobs.containsKey(jobNum)) {
+            jobNum++;
+        }
+        return jobNum;
+    }
+
     // Executes a normal external command
     private static void executeCommand(List<String> command, boolean isBackground) {
         try {
@@ -176,7 +185,7 @@ public class Main {
 
             if (isBackground) {
                 long pid = process.pid();
-                int jobNumber = jobCounter++;
+                int jobNumber = getNextJobNumber();
                 BackgroundJob job = new BackgroundJob(jobNumber, (int) pid, String.join(" ", command));
                 backgroundJobs.put(jobNumber, job);
                 System.out.println("[" + jobNumber + "] " + pid);
@@ -264,7 +273,7 @@ public class Main {
 
             if (isBackground) {
                 long pid = p2.pid();
-                int jobNumber = jobCounter++;
+                int jobNumber = getNextJobNumber();
                 BackgroundJob job = new BackgroundJob(jobNumber, (int) pid, line);
                 backgroundJobs.put(jobNumber, job);
                 System.out.println("[" + jobNumber + "] " + pid);
