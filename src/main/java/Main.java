@@ -3,16 +3,23 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.regex.*;
 
-public class Shell {
+public class Main {
     public static void main(String[] args) throws IOException {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         String line;
 
+        System.out.print("$ ");
+        System.out.flush();
+
         while ((line = reader.readLine()) != null) {
             if (line.trim().isEmpty()) {
+                System.out.print("$ ");
+                System.out.flush();
                 continue;
             }
             executeCommand(line);
+            System.out.print("$ ");
+            System.out.flush();
         }
     }
 
