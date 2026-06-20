@@ -1,4 +1,7 @@
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileWriter;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -27,37 +30,49 @@ public class Main {
 
             if (parts.isEmpty()) continue;
 
-            String command = parts.get(0);
+            // ================= REDIRECTION CHECK =================
+            int redirectIndex = -1;
+            String outputFile = null;
+
+            for (int i = 0; i < parts.size(); i++) {
+                if (parts.get(i).equals(">") || parts.get(i).equals("1>")) {
+                    redirectIndex = i;
+                    outputFile = parts.get(i + 1);
+                    break;
+                }
+            }
+
+            List<String> commandParts;
+            if (redirectIndex != -1) {
+                commandParts = parts.subList(0, redirectIndex);
+            } else {
+                commandParts = parts;
+            }
+
+            if (commandParts.isEmpty()) continue;
+
+            String rawCommand = commandParts.get(0);
+            String command = stripQuotes(rawCommand);
 
             // ================= EXIT =================
             if (command.equals("exit")) {
                 System.exit(0);
             }
 
-            // ================= ECHO =================
-            if (command.equals("echo")) {
-                for (int i = 1; i < parts.size(); i++) {
-                    System.out.print(parts.get(i));
-                    if (i != parts.size() - 1) System.out.print(" ");
-                }
-                System.out.println();
-                continue;
-            }
-
             // ================= TYPE =================
             if (command.equals("type")) {
-                if (parts.size() < 2) continue;
+                if (commandParts.size() < 2) continue;
 
-                String target = parts.get(1);
+                String target = commandParts.get(1);
 
                 if (builtins.contains(target)) {
-                    System.out.println(target + " is a shell builtin");
+                    writeOutput(target + " is a shell builtin", outputFile);
                 } else {
                     String path = findExecutable(target);
                     if (path != null) {
-                        System.out.println(target + " is " + path);
+                        writeOutput(target + " is " + path, outputFile);
                     } else {
-                        System.out.println(target + ": not found");
+                        writeOutput(target + ": not found", outputFile);
                     }
                 }
                 continue;
@@ -65,15 +80,15 @@ public class Main {
 
             // ================= PWD =================
             if (command.equals("pwd")) {
-                System.out.println(currentDir);
+                writeOutput(currentDir, outputFile);
                 continue;
             }
 
             // ================= CD =================
             if (command.equals("cd")) {
-                if (parts.size() < 2) continue;
+                if (commandParts.size() < 2) continue;
 
-                String target = parts.get(1);
+                String target = commandParts.get(1);
                 String newPath;
 
                 String home = System.getenv("HOME");
@@ -93,42 +108,83 @@ public class Main {
                 if (dir.exists() && dir.isDirectory()) {
                     currentDir = dir.getAbsolutePath();
                 } else {
-                    System.out.println("cd: " + target + ": No such file or directory");
+                    writeOutput("cd: " + target + ": No such file or directory", outputFile);
                 }
                 continue;
             }
 
             // ================= EXECUTION =================
-            String execPath = findExecutable(command);
+            String execName = stripQuotes(rawCommand);
+
+            String execPath = findExecutable(execName);
 
             if (execPath == null) {
-                System.out.println(command + ": not found");
+                writeOutput(command + ": not found", outputFile);
                 continue;
             }
 
             try {
                 List<String> cmd = new ArrayList<>();
-                cmd.add(command);
+                cmd.add(execName);
 
-                for (int i = 1; i < parts.size(); i++) {
-                    cmd.add(parts.get(i));
+                for (int i = 1; i < commandParts.size(); i++) {
+                    cmd.add(commandParts.get(i));
                 }
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
-                pb.inheritIO();
 
                 Process p = pb.start();
+
+                // READ STDOUT
+                BufferedReader br = new BufferedReader(
+                        new InputStreamReader(p.getInputStream())
+                );
+
+                StringBuilder sb = new StringBuilder();
+                String line;
+
+                while ((line = br.readLine()) != null) {
+                    sb.append(line).append("\n");
+                }
+
                 p.waitFor();
 
+                writeOutput(sb.toString().trim(), outputFile);
+
             } catch (Exception e) {
-                System.out.println(command + ": not found");
+                writeOutput(command + ": not found", outputFile);
             }
         }
 
         sc.close();
     }
 
-    // ================= PARSER (FULL QUOTES + ESCAPES) =================
+    // ================= WRITE OUTPUT (REDIRECTION HANDLER) =================
+    static void writeOutput(String text, String file) throws Exception {
+        if (file == null) {
+            System.out.println(text);
+        } else {
+            FileWriter fw = new FileWriter(file);
+            fw.write(text);
+            fw.close();
+        }
+    }
+
+    // ================= REMOVE QUOTES =================
+    static String stripQuotes(String s) {
+        if (s == null) return null;
+
+        if (s.length() >= 2) {
+            if ((s.startsWith("'") && s.endsWith("'")) ||
+                (s.startsWith("\"") && s.endsWith("\""))) {
+                return s.substring(1, s.length() - 1);
+            }
+        }
+
+        return s;
+    }
+
+    // ================= PARSER =================
     static List<String> parse(String input) {
         List<String> result = new ArrayList<>();
         StringBuilder current = new StringBuilder();
@@ -139,19 +195,16 @@ public class Main {
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
 
-            // -------- SINGLE QUOTES --------
             if (c == '\'' && !inDouble) {
                 inSingle = !inSingle;
                 continue;
             }
 
-            // -------- DOUBLE QUOTES --------
             if (c == '"' && !inSingle) {
                 inDouble = !inDouble;
                 continue;
             }
 
-            // -------- ESCAPE OUTSIDE QUOTES --------
             if (c == '\\' && !inSingle && !inDouble) {
                 if (i + 1 < input.length()) {
                     i++;
@@ -160,11 +213,9 @@ public class Main {
                 continue;
             }
 
-            // -------- ESCAPE INSIDE DOUBLE QUOTES --------
             if (inDouble && c == '\\') {
                 if (i + 1 < input.length()) {
                     char next = input.charAt(i + 1);
-
                     if (next == '"' || next == '\\') {
                         current.append(next);
                         i++;
@@ -178,7 +229,6 @@ public class Main {
                 continue;
             }
 
-            // -------- SPLIT OUTSIDE QUOTES --------
             if (!inSingle && !inDouble && Character.isWhitespace(c)) {
                 if (current.length() > 0) {
                     result.add(current.toString());
@@ -196,7 +246,7 @@ public class Main {
         return result;
     }
 
-    // ================= PATH RESOLUTION =================
+    // ================= PATH =================
     static String resolvePath(String base, String target) {
         String[] baseParts = base.split("/");
         List<String> stack = new ArrayList<>();
