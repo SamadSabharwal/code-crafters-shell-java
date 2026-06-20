@@ -1,7 +1,19 @@
-import java.io.*;
-import java.nio.file.*;
-import java.util.*;
-import java.util.regex.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Main {
     private static Map<Integer, BackgroundJob> backgroundJobs = new LinkedHashMap<>();
@@ -158,12 +170,11 @@ public class Main {
                 CommandParsed parsed = parsedCommands.get(i);
                 ProcessBuilder pb = new ProcessBuilder(parsed.command);
 
-                // Connect stdin from previous process
+                // All commands need to use PIPE for input/output to allow manual redirection
                 if (i > 0) {
-                    pb.redirectInput(processes.get(i - 1).getInputStream());
+                    pb.redirectInput(ProcessBuilder.Redirect.PIPE);
                 }
 
-                // Connect stdout to next process (except for the last command)
                 if (i < parsedCommands.size() - 1) {
                     pb.redirectOutput(ProcessBuilder.Redirect.PIPE);
                 } else {
@@ -192,6 +203,29 @@ public class Main {
 
                 Process process = pb.start();
                 processes.add(process);
+            }
+
+            // Connect the processes using pipes
+            for (int i = 0; i < processes.size() - 1; i++) {
+                Process currentProcess = processes.get(i);
+                Process nextProcess = processes.get(i + 1);
+
+                // Create a thread to copy output from current process to input of next process
+                new Thread(() -> {
+                    try {
+                        InputStream input = currentProcess.getInputStream();
+                        OutputStream output = nextProcess.getOutputStream();
+                        byte[] buffer = new byte[1024];
+                        int bytesRead;
+                        while ((bytesRead = input.read(buffer)) != -1) {
+                            output.write(buffer, 0, bytesRead);
+                            output.flush();
+                        }
+                        output.close();
+                    } catch (IOException e) {
+                        // Pipe closed, process ended
+                    }
+                }).start();
             }
 
             // Wait for all processes to complete
