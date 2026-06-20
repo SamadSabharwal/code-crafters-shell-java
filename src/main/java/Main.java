@@ -3,12 +3,27 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
 public class Main {
-    private static final List<Process> backgroundProcesses = new ArrayList<>();
+    static class Job {
+        int jobNumber;
+        long pid;
+        String command;
+        Process process;
+        String status; // "Running", "Done", etc.
+
+        Job(int jobNumber, long pid, String command, Process process) {
+            this.jobNumber = jobNumber;
+            this.pid = pid;
+            this.command = command;
+            this.process = process;
+            this.status = "Running";
+        }
+    }
+
+    private static final List<Job> jobs = new ArrayList<>();
     private static int jobCounter = 0;
 
     public static void main(String[] args) throws Exception {
@@ -43,11 +58,18 @@ public class Main {
                 continue;
             }
 
-            executeCommand(tokens, background);
+            // Reconstruct the command string as typed (minus the trailing "&"),
+            // used for the `jobs` listing.
+            String commandStr = String.join(" ", tokens);
+            if (background) {
+                commandStr = commandStr + " &";
+            }
+
+            executeCommand(tokens, background, commandStr);
         }
     }
 
-    private static void executeCommand(List<String> tokens, boolean background) {
+    private static void executeCommand(List<String> tokens, boolean background, String commandStr) {
         String cmd = tokens.get(0);
 
         // Built-ins always run in the foreground (in-process)
@@ -67,6 +89,9 @@ public class Main {
             case "type":
                 builtinType(tokens);
                 return;
+            case "jobs":
+                builtinJobs();
+                return;
         }
 
         try {
@@ -84,7 +109,7 @@ public class Main {
             if (background) {
                 jobCounter++;
                 System.out.println("[" + jobCounter + "] " + process.pid());
-                backgroundProcesses.add(process);
+                jobs.add(new Job(jobCounter, process.pid(), commandStr, process));
             } else {
                 process.waitFor();
             }
@@ -96,12 +121,24 @@ public class Main {
     }
 
     private static void reapFinishedBackgroundJobs() {
-        Iterator<Process> it = backgroundProcesses.iterator();
-        while (it.hasNext()) {
-            Process p = it.next();
-            if (!p.isAlive()) {
-                it.remove();
+        for (Job job : jobs) {
+            if (job.process != null && !job.process.isAlive()) {
+                job.status = "Done";
             }
+        }
+        // Keep jobs in the list so a final "Done" status could be reported
+        // by `jobs` if needed in later stages; remove here only if your
+        // stage requires immediate cleanup. For now we leave them tracked.
+    }
+
+    private static void builtinJobs() {
+        for (int i = 0; i < jobs.size(); i++) {
+            Job job = jobs.get(i);
+            boolean isMostRecent = (i == jobs.size() - 1);
+            String marker = isMostRecent ? "+" : "-";
+            String status = job.status;
+            String paddedStatus = String.format("%-24s", status);
+            System.out.println("[" + job.jobNumber + "]" + marker + "  " + paddedStatus + job.command);
         }
     }
 
@@ -129,7 +166,7 @@ public class Main {
     private static void builtinType(List<String> tokens) {
         if (tokens.size() < 2) return;
         String name = tokens.get(1);
-        Set<String> builtins = Set.of("exit", "echo", "type", "pwd", "cd");
+        Set<String> builtins = Set.of("exit", "echo", "type", "pwd", "cd", "jobs");
         if (builtins.contains(name)) {
             System.out.println(name + " is a shell builtin");
             return;
