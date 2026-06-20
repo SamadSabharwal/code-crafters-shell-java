@@ -41,7 +41,7 @@ public class Main {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
 
         while (true) {
-            reapFinishedBackgroundJobs();
+            performReap(false);
 
             System.out.print("$ ");
             System.out.flush();
@@ -204,17 +204,23 @@ public class Main {
         }
     }
 
-    private static void reapFinishedBackgroundJobs() {
+    // Shared reap logic used both before each prompt and by the `jobs`
+    // builtin.
+    //
+    // 1. Refresh status: mark any finished process as "Done".
+    // 2. Compute markers (+/-/space) against the FULL current list, so a
+    //    job about to be removed still gets the correct marker for this
+    //    display.
+    // 3. Print: either every job (printAllJobs == true, used by `jobs`),
+    //    or only the ones that just became Done (printAllJobs == false,
+    //    used for automatic reaping before the prompt).
+    // 4. Remove any Done job from the table so it's never shown again.
+    private static void performReap(boolean printAllJobs) {
         for (Job job : jobs) {
             if (job.process != null && !job.process.isAlive()) {
                 job.status = "Done";
             }
         }
-    }
-
-    private static void builtinJobs() {
-        // Refresh status for every tracked job right before displaying.
-        reapFinishedBackgroundJobs();
 
         int lastIndex = jobs.size() - 1;
         int secondLastIndex = jobs.size() - 2;
@@ -229,15 +235,23 @@ public class Main {
             } else {
                 marker = " ";
             }
-            String paddedStatus = String.format("%-24s", job.status);
-            // Running jobs show the trailing "&" (as typed); Done jobs don't.
-            String displayCommand = job.status.equals("Running") ? job.command + " &" : job.command;
-            System.out.println("[" + job.jobNumber + "]" + marker + "  " + paddedStatus + displayCommand);
+
+            boolean isDone = job.status.equals("Done");
+            if (printAllJobs || isDone) {
+                String paddedStatus = String.format("%-24s", job.status);
+                // Running jobs show the trailing "&" (as typed); Done jobs don't.
+                String displayCommand = job.status.equals("Running") ? job.command + " &" : job.command;
+                System.out.println("[" + job.jobNumber + "]" + marker + "  " + paddedStatus + displayCommand);
+            }
         }
 
-        // Reap: remove any job that was just reported as Done so it doesn't
-        // appear again on the next `jobs` call.
+        // Reap: remove any job that was just reported as Done so it never
+        // appears again, whether displayed here or on a future call.
         jobs.removeIf(job -> job.status.equals("Done"));
+    }
+
+    private static void builtinJobs() {
+        performReap(true);
     }
 
     private static void builtinCd(List<String> tokens) {
