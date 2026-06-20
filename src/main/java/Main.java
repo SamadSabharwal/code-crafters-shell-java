@@ -72,21 +72,13 @@ public class Main {
             }
 
             try {
+                // ✔ CRITICAL FIX:
+                // FIRST argument MUST be execPath (this becomes argv[0] handling correct in Java)
                 List<String> cmd = new ArrayList<>();
-
-                // ❗ IMPORTANT FIX:
-                // argv[0] MUST be command name, not full path
-                cmd.add(command);
-
-                for (int i = 1; i < parts.length; i++) {
-                    cmd.add(parts[i]);
-                }
+                cmd.add(execPath);   // executable path
+                cmd.addAll(Arrays.asList(parts).subList(1, parts.length)); // args only
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
-
-                // Replace ONLY execution target (NOT argv[0] seen by program)
-                pb.command().set(0, execPath);
-
                 pb.inheritIO();
 
                 Process process = pb.start();
