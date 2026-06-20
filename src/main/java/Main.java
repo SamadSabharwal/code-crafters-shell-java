@@ -126,9 +126,8 @@ public class Main {
                 job.status = "Done";
             }
         }
-        // Keep jobs in the list so a final "Done" status could be reported
-        // by `jobs` if needed in later stages; remove here only if your
-        // stage requires immediate cleanup. For now we leave them tracked.
+        // Jobs are kept in the list (with updated status) rather than removed
+        // immediately, since later stages may need to report "Done" jobs too.
     }
 
     private static void builtinJobs() {
@@ -136,8 +135,7 @@ public class Main {
             Job job = jobs.get(i);
             boolean isMostRecent = (i == jobs.size() - 1);
             String marker = isMostRecent ? "+" : "-";
-            String status = job.status;
-            String paddedStatus = String.format("%-24s", status);
+            String paddedStatus = String.format("%-24s", job.status);
             System.out.println("[" + job.jobNumber + "]" + marker + "  " + paddedStatus + job.command);
         }
     }
