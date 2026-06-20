@@ -1,18 +1,33 @@
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class Main {
-    // Keep track of background processes to recycle job IDs
-    private static final Map<Integer, Process> activeJobs = new HashMap<>();
+    // 1. Helper class to store the process AND the command that started it
+    static class Job {
+        Process process;
+        String command;
+
+        Job(Process process, String command) {
+            this.process = process;
+            this.command = command;
+        }
+    }
+
+    // Map now stores our Job wrapper instead of just the Process
+    private static final Map<Integer, Job> activeJobs = new HashMap<>();
 
     public static void main(String[] args) throws Exception {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         
         while (true) {
+            // 2. Poll background jobs before prompting the user
+            checkCompletedJobs();
+
             System.out.print("$ ");
             String input = reader.readLine();
             
@@ -20,15 +35,13 @@ public class Main {
             input = input.trim();
             if (input.isEmpty()) continue;
 
-            // 1. Check for background job operator '&'
             boolean isBackground = false;
             if (input.endsWith("&")) {
                 isBackground = true;
-                // Remove the '&' and any trailing spaces from the command string
+                // Strip the ampersand so 'input' becomes the clean command string we save
                 input = input.substring(0, input.length() - 1).trim();
             }
 
-            // 2. Route to appropriate executor
             if (input.contains("|")) {
                 executePipeline(input, isBackground);
             } else {
@@ -37,12 +50,29 @@ public class Main {
         }
     }
 
+    private static void checkCompletedJobs() {
+        List<Integer> doneJobs = new ArrayList<>();
+        // Sort keys to ensure we print completions in numerical Job ID order
+        List<Integer> jobIds = new ArrayList<>(activeJobs.keySet());
+        Collections.sort(jobIds);
+
+        for (int id : jobIds) {
+            Job job = activeJobs.get(id);
+            if (!job.process.isAlive()) {
+                // 3. Print exactly as the tester expects (note the spacing)
+                System.out.println("[" + id + "]+  Done                 " + job.command);
+                doneJobs.add(id);
+            }
+        }
+
+        // Remove finished jobs so their IDs are recycled
+        for (int id : doneJobs) {
+            activeJobs.remove(id);
+        }
+    }
+
     private static void executeSingle(String input, boolean isBackground) {
-        // TODO: Handle your built-in commands (cd, exit, echo, type) here before ProcessBuilder
-        // if (input.startsWith("cd ")) { ... return; }
-        
         try {
-            // Split by spaces (assuming you aren't using a custom quote tokenizer yet)
             String[] cmdArgs = input.split(" +");
             ProcessBuilder pb = new ProcessBuilder(cmdArgs);
             pb.redirectError(ProcessBuilder.Redirect.INHERIT);
@@ -52,10 +82,9 @@ public class Main {
 
             if (isBackground) {
                 int jobId = getNextJobId();
-                activeJobs.put(jobId, process);
+                activeJobs.put(jobId, new Job(process, input));
                 System.out.println("[" + jobId + "] " + process.pid());
             } else {
-                // Only wait if it's NOT a background job
                 process.waitFor();
             }
         } catch (Exception e) {
@@ -82,25 +111,20 @@ public class Main {
 
             if (isBackground) {
                 int jobId = getNextJobId();
-                // For pipelines, we track the final process in the chain
-                activeJobs.put(jobId, lastProcess);
+                // Store the full pipeline string for the Done message
+                activeJobs.put(jobId, new Job(lastProcess, input));
                 System.out.println("[" + jobId + "] " + lastProcess.pid());
             } else {
                 lastProcess.waitFor();
             }
-
         } catch (Exception e) {
             System.out.println("Error executing pipeline: " + e.getMessage());
         }
     }
 
-    /**
-     * Finds the lowest available integer for a job ID.
-     * If a process mapped to an ID is no longer alive, its ID is recycled.
-     */
     private static int getNextJobId() {
         int id = 1;
-        while (activeJobs.containsKey(id) && activeJobs.get(id).isAlive()) {
+        while (activeJobs.containsKey(id) && activeJobs.get(id).process.isAlive()) {
             id++;
         }
         return id;
