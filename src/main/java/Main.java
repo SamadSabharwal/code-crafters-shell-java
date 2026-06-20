@@ -60,8 +60,9 @@ public class Main {
             }
             if (rawTokens.isEmpty()) continue;
 
+            // Base command string for job display (no trailing "&" here —
+            // that's added conditionally in builtinJobs based on status).
             String commandStr = String.join(" ", rawTokens);
-            if (background) commandStr = commandStr + " &";
 
             Redirection redir = new Redirection();
             List<String> tokens = extractRedirection(rawTokens, redir);
@@ -71,6 +72,7 @@ public class Main {
         }
     }
 
+    // Recognizes: <  >  1>  >>  1>>  2>  2>>
     private static List<String> extractRedirection(List<String> rawTokens, Redirection redir) {
         List<String> result = new ArrayList<>();
         for (int i = 0; i < rawTokens.size(); i++) {
@@ -211,23 +213,32 @@ public class Main {
     }
 
     private static void builtinJobs() {
-    int lastIndex = jobs.size() - 1;
-    int secondLastIndex = jobs.size() - 2;
+        // Refresh status for every tracked job right before displaying.
+        reapFinishedBackgroundJobs();
 
-    for (int i = 0; i < jobs.size(); i++) {
-        Job job = jobs.get(i);
-        String marker;
-        if (i == lastIndex) {
-            marker = "+";
-        } else if (i == secondLastIndex) {
-            marker = "-";
-        } else {
-            marker = " ";
+        int lastIndex = jobs.size() - 1;
+        int secondLastIndex = jobs.size() - 2;
+
+        for (int i = 0; i < jobs.size(); i++) {
+            Job job = jobs.get(i);
+            String marker;
+            if (i == lastIndex) {
+                marker = "+";
+            } else if (i == secondLastIndex) {
+                marker = "-";
+            } else {
+                marker = " ";
+            }
+            String paddedStatus = String.format("%-24s", job.status);
+            // Running jobs show the trailing "&" (as typed); Done jobs don't.
+            String displayCommand = job.status.equals("Running") ? job.command + " &" : job.command;
+            System.out.println("[" + job.jobNumber + "]" + marker + "  " + paddedStatus + displayCommand);
         }
-        String paddedStatus = String.format("%-24s", job.status);
-        System.out.println("[" + job.jobNumber + "]" + marker + "  " + paddedStatus + job.command);
+
+        // Reap: remove any job that was just reported as Done so it doesn't
+        // appear again on the next `jobs` call.
+        jobs.removeIf(job -> job.status.equals("Done"));
     }
-}
 
     private static void builtinCd(List<String> tokens) {
         // Resolve HOME from the environment, not Java's user.home system
@@ -282,6 +293,8 @@ public class Main {
         System.out.println(name + ": not found");
     }
 
+    // Tokenizer supporting single quotes, double quotes, backslash escapes,
+    // and redirection operators: < > 1> >> 1>> 2> 2>>
     private static List<String> tokenize(String line) {
         List<String> tokens = new ArrayList<>();
         StringBuilder current = new StringBuilder();
