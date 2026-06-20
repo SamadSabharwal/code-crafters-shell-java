@@ -36,8 +36,31 @@ public class Main {
                 continue;
             }
             executeCommand(line);
+            
+            // Check for completed jobs and print their status
+            printCompletedJobs();
+            
             System.out.print("$ ");
             System.out.flush();
+        }
+    }
+
+    private static synchronized void printCompletedJobs() {
+        List<Integer> completedJobNumbers = new ArrayList<>();
+        
+        for (Map.Entry<Integer, BackgroundJob> entry : backgroundJobs.entrySet()) {
+            BackgroundJob job = entry.getValue();
+            if ("Done".equals(job.status) && !job.notified) {
+                System.out.println("[" + job.jobNumber + "]+  Done                 " + job.command);
+                System.out.flush();
+                job.notified = true;
+                completedJobNumbers.add(entry.getKey());
+            }
+        }
+        
+        // Remove notified completed jobs
+        for (Integer jobNumber : completedJobNumbers) {
+            backgroundJobs.remove(jobNumber);
         }
     }
 
@@ -125,7 +148,9 @@ public class Main {
                 new Thread(() -> {
                     try {
                         process.waitFor();
-                        job.status = "Done";
+                        synchronized (Main.class) {
+                            job.status = "Done";
+                        }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
@@ -466,12 +491,14 @@ public class Main {
         int pid;
         String command;
         String status;
+        boolean notified;
 
         BackgroundJob(int jobNumber, int pid, String command) {
             this.jobNumber = jobNumber;
             this.pid = pid;
             this.command = command;
             this.status = "Running";
+            this.notified = false;
         }
     }
 }
