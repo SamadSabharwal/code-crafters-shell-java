@@ -23,8 +23,8 @@ public class Main {
             if (!sc.hasNextLine()) break;
 
             String input = sc.nextLine();
-
             List<String> parts = parse(input);
+
             if (parts.isEmpty()) continue;
 
             String command = parts.get(0);
@@ -117,8 +117,8 @@ public class Main {
                 ProcessBuilder pb = new ProcessBuilder(cmd);
                 pb.inheritIO();
 
-                Process process = pb.start();
-                process.waitFor();
+                Process p = pb.start();
+                p.waitFor();
 
             } catch (Exception e) {
                 System.out.println(command + ": not found");
@@ -128,7 +128,7 @@ public class Main {
         sc.close();
     }
 
-    // ================= FULL PARSER (BACKSLASH + QUOTES) =================
+    // ================= PARSER (FULL QUOTES + ESCAPES) =================
     static List<String> parse(String input) {
         List<String> result = new ArrayList<>();
         StringBuilder current = new StringBuilder();
@@ -139,19 +139,19 @@ public class Main {
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
 
-            // ================= SINGLE QUOTE =================
+            // -------- SINGLE QUOTES --------
             if (c == '\'' && !inDouble) {
                 inSingle = !inSingle;
                 continue;
             }
 
-            // ================= DOUBLE QUOTE =================
+            // -------- DOUBLE QUOTES --------
             if (c == '"' && !inSingle) {
                 inDouble = !inDouble;
                 continue;
             }
 
-            // ================= BACKSLASH (ONLY OUTSIDE QUOTES) =================
+            // -------- ESCAPE OUTSIDE QUOTES --------
             if (c == '\\' && !inSingle && !inDouble) {
                 if (i + 1 < input.length()) {
                     i++;
@@ -160,7 +160,25 @@ public class Main {
                 continue;
             }
 
-            // ================= SPLIT OUTSIDE QUOTES =================
+            // -------- ESCAPE INSIDE DOUBLE QUOTES --------
+            if (inDouble && c == '\\') {
+                if (i + 1 < input.length()) {
+                    char next = input.charAt(i + 1);
+
+                    if (next == '"' || next == '\\') {
+                        current.append(next);
+                        i++;
+                        continue;
+                    } else {
+                        current.append('\\');
+                        continue;
+                    }
+                }
+                current.append('\\');
+                continue;
+            }
+
+            // -------- SPLIT OUTSIDE QUOTES --------
             if (!inSingle && !inDouble && Character.isWhitespace(c)) {
                 if (current.length() > 0) {
                     result.add(current.toString());
@@ -178,49 +196,47 @@ public class Main {
         return result;
     }
 
-    // ================= PATH RESOLVER =================
+    // ================= PATH RESOLUTION =================
     static String resolvePath(String base, String target) {
-
         String[] baseParts = base.split("/");
         List<String> stack = new ArrayList<>();
 
-        for (String part : baseParts) {
-            if (!part.isEmpty()) stack.add(part);
+        for (String p : baseParts) {
+            if (!p.isEmpty()) stack.add(p);
         }
 
-        String[] targetParts = target.split("/");
+        String[] t = target.split("/");
 
-        for (String part : targetParts) {
-            if (part.equals("") || part.equals(".")) continue;
+        for (String p : t) {
+            if (p.equals("") || p.equals(".")) continue;
 
-            if (part.equals("..")) {
+            if (p.equals("..")) {
                 if (!stack.isEmpty()) stack.remove(stack.size() - 1);
             } else {
-                stack.add(part);
+                stack.add(p);
             }
         }
 
-        StringBuilder result = new StringBuilder("/");
+        StringBuilder sb = new StringBuilder("/");
         for (int i = 0; i < stack.size(); i++) {
-            result.append(stack.get(i));
-            if (i != stack.size() - 1) result.append("/");
+            sb.append(stack.get(i));
+            if (i != stack.size() - 1) sb.append("/");
         }
 
-        return result.toString();
+        return sb.toString();
     }
 
     // ================= EXEC SEARCH =================
-    static String findExecutable(String target) {
+    static String findExecutable(String cmd) {
         String pathEnv = System.getenv("PATH");
         if (pathEnv == null) return null;
 
         String[] dirs = pathEnv.split(":");
 
-        for (String dir : dirs) {
-            File file = new File(dir, target);
-
-            if (file.exists() && file.isFile() && file.canExecute()) {
-                return file.getAbsolutePath();
+        for (String d : dirs) {
+            File f = new File(d, cmd);
+            if (f.exists() && f.isFile() && f.canExecute()) {
+                return f.getAbsolutePath();
             }
         }
 
