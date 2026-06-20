@@ -170,15 +170,17 @@ public class Main {
                 CommandParsed parsed = parsedCommands.get(i);
                 ProcessBuilder pb = new ProcessBuilder(parsed.command);
 
-                // All commands need to use PIPE for input/output to allow manual redirection
+                // Set up input redirection for non-first commands
                 if (i > 0) {
                     pb.redirectInput(ProcessBuilder.Redirect.PIPE);
                 }
 
+                // Set up output redirection
                 if (i < parsedCommands.size() - 1) {
+                    // Not the last command - use PIPE for output
                     pb.redirectOutput(ProcessBuilder.Redirect.PIPE);
                 } else {
-                    // Last command: handle output redirection if specified
+                    // Last command - handle output redirection if specified, otherwise inherit stdout
                     if (parsed.stdoutFile != null) {
                         File outFile = new File(parsed.stdoutFile);
                         ensureParentDirectory(outFile);
@@ -188,6 +190,7 @@ public class Main {
                             pb.redirectOutput(ProcessBuilder.Redirect.to(outFile));
                         }
                     }
+                    // If no redirection, output goes to parent's stdout (default behavior)
                 }
 
                 // Handle stderr redirection
@@ -227,6 +230,23 @@ public class Main {
                     }
                 }).start();
             }
+
+            // For the last process, copy its output to our stdout
+            Process lastProcess = processes.get(processes.size() - 1);
+            new Thread(() -> {
+                try {
+                    InputStream input = lastProcess.getInputStream();
+                    OutputStream output = System.out;
+                    byte[] buffer = new byte[1024];
+                    int bytesRead;
+                    while ((bytesRead = input.read(buffer)) != -1) {
+                        output.write(buffer, 0, bytesRead);
+                        output.flush();
+                    }
+                } catch (IOException e) {
+                    // Stream closed
+                }
+            }).start();
 
             // Wait for all processes to complete
             for (Process process : processes) {
