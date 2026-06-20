@@ -49,17 +49,14 @@ public class Main {
 
                 if (builtins.contains(target)) {
                     System.out.println(target + " is a shell builtin");
-                    continue;
-                }
-
-                String path = findExecutable(target);
-
-                if (path != null) {
-                    System.out.println(target + " is " + path);
                 } else {
-                    System.out.println(target + ": not found");
+                    String path = findExecutable(target);
+                    if (path != null) {
+                        System.out.println(target + " is " + path);
+                    } else {
+                        System.out.println(target + ": not found");
+                    }
                 }
-
                 continue;
             }
 
@@ -72,11 +69,15 @@ public class Main {
             }
 
             try {
-                // ✔ CRITICAL FIX:
-                // FIRST argument MUST be execPath (this becomes argv[0] handling correct in Java)
+                // IMPORTANT:
+                // DO NOT try to control argv[0] in Java (impossible here)
+                // Just run executable normally
                 List<String> cmd = new ArrayList<>();
-                cmd.add(execPath);   // executable path
-                cmd.addAll(Arrays.asList(parts).subList(1, parts.length)); // args only
+                cmd.add(execPath);
+
+                for (int i = 1; i < parts.length; i++) {
+                    cmd.add(parts[i]);
+                }
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
                 pb.inheritIO();
@@ -92,7 +93,6 @@ public class Main {
         sc.close();
     }
 
-    // ================= PATH SEARCH =================
     static String findExecutable(String target) {
         String pathEnv = System.getenv("PATH");
         if (pathEnv == null) return null;
