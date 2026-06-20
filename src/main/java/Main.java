@@ -69,14 +69,20 @@ public class Main {
                 continue;
             }
 
-            // ================= CD (FIXED) =================
+            // ================= CD =================
             if (command.equals("cd")) {
-                if (parts.length < 2) {
-                    continue;
-                }
+                if (parts.length < 2) continue;
 
                 String target = parts[1];
-                File dir = new File(target);
+                String newPath;
+
+                if (target.startsWith("/")) {
+                    newPath = target;
+                } else {
+                    newPath = resolvePath(currentDir, target);
+                }
+
+                File dir = new File(newPath);
 
                 if (dir.exists() && dir.isDirectory()) {
                     currentDir = dir.getAbsolutePath();
@@ -86,7 +92,7 @@ public class Main {
                 continue;
             }
 
-            // ================= EXECUTION =================
+            // ================= EXECUTION (FIXED) =================
             String execPath = findExecutable(command);
 
             if (execPath == null) {
@@ -96,7 +102,9 @@ public class Main {
 
             try {
                 List<String> cmd = new ArrayList<>();
-                cmd.add(command);
+
+                // ✔ IMPORTANT FIX: use FULL PATH
+                cmd.add(execPath);
 
                 for (int i = 1; i < parts.length; i++) {
                     cmd.add(parts[i]);
@@ -116,6 +124,39 @@ public class Main {
         sc.close();
     }
 
+    // ================= PATH RESOLVER =================
+    static String resolvePath(String base, String target) {
+
+        String[] baseParts = base.split("/");
+        List<String> stack = new ArrayList<>();
+
+        for (String part : baseParts) {
+            if (!part.isEmpty()) stack.add(part);
+        }
+
+        String[] targetParts = target.split("/");
+
+        for (String part : targetParts) {
+
+            if (part.equals("") || part.equals(".")) continue;
+
+            if (part.equals("..")) {
+                if (!stack.isEmpty()) stack.remove(stack.size() - 1);
+            } else {
+                stack.add(part);
+            }
+        }
+
+        StringBuilder result = new StringBuilder("/");
+        for (int i = 0; i < stack.size(); i++) {
+            result.append(stack.get(i));
+            if (i != stack.size() - 1) result.append("/");
+        }
+
+        return result.toString();
+    }
+
+    // ================= EXEC SEARCH =================
     static String findExecutable(String target) {
         String pathEnv = System.getenv("PATH");
         if (pathEnv == null) return null;
