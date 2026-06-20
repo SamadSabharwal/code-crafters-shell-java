@@ -1,338 +1,356 @@
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.nio.file.Files;
+import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class Main {
-    private static Map<Integer, BackgroundJob> backgroundJobs = new LinkedHashMap<>();
-    private static int jobCounter = 1;
-    private static final Set<String> BUILTINS = new HashSet<>(Arrays.asList(
-        "echo", "type", "exit", "pwd", "cd", "jobs"
-    ));
+    private static final Set<String> BUILTINS = Set.of("exit", "echo", "type", "pwd", "cd", "jobs");
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws Exception {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
-        String line;
 
-        System.out.print("$ ");
-        System.out.flush();
+        while (true) {
+            System.out.print("$ ");
+            String line = reader.readLine();
+            if (line == null) break; // EOF (Ctrl+D)
 
-        while ((line = reader.readLine()) != null) {
-            if (line.trim().isEmpty()) {
-                System.out.print("$ ");
-                System.out.flush();
+            if (line.isBlank()) continue;
+
+            List<String> tokens;
+            try {
+                tokens = tokenize(line);
+            } catch (IllegalArgumentException e) {
+                System.out.println(e.getMessage());
                 continue;
             }
-            executeCommand(line);
-            System.out.print("$ ");
-            System.out.flush();
-        }
-    }
+            if (tokens.isEmpty()) continue;
 
-    private static void executeCommand(String commandLine) {
-        try {
-            // Parse the command line
-            CommandParsed parsed = parseCommand(commandLine);
-
-            if (parsed == null) {
-                return;
-            }
-
-            // Check if command should run in background
-            boolean runInBackground = parsed.runInBackground;
-
-            // Handle builtins
-            if (!parsed.command.isEmpty()) {
-                String firstCommand = parsed.command.get(0);
-
-                if ("echo".equals(firstCommand)) {
-                    handleEcho(parsed.command);
-                    return;
-                } else if ("type".equals(firstCommand)) {
-                    handleType(parsed.command);
-                    return;
-                } else if ("exit".equals(firstCommand)) {
-                    handleExit(parsed.command);
-                    return;
-                } else if ("pwd".equals(firstCommand)) {
-                    handlePwd();
-                    return;
-                } else if ("cd".equals(firstCommand)) {
-                    handleCd(parsed.command);
-                    return;
-                } else if ("jobs".equals(firstCommand)) {
-                    handleJobs();
-                    return;
-                }
-            }
-
-            // Create ProcessBuilder for external commands
-            ProcessBuilder pb = new ProcessBuilder(parsed.command);
-
-            // Handle stdout redirection (> or >>)
-            if (parsed.stdoutFile != null) {
-                File outFile = new File(parsed.stdoutFile);
-                ensureParentDirectory(outFile);
-                if (parsed.stdoutAppend) {
-                    pb.redirectOutput(ProcessBuilder.Redirect.appendTo(outFile));
-                } else {
-                    pb.redirectOutput(ProcessBuilder.Redirect.to(outFile));
-                }
-            }
-
-            // Handle stderr redirection (2> or 2>>)
-            if (parsed.stderrFile != null) {
-                File errFile = new File(parsed.stderrFile);
-                ensureParentDirectory(errFile);
-                if (parsed.stderrAppend) {
-                    pb.redirectError(ProcessBuilder.Redirect.appendTo(errFile));
-                } else {
-                    pb.redirectError(ProcessBuilder.Redirect.to(errFile));
-                }
-            }
-
-            // Start the process
-            Process process = pb.start();
-
-            if (runInBackground) {
-                // Register background job
-                long pid = process.pid();
-                int jobNumber = jobCounter++;
-                BackgroundJob job = new BackgroundJob(jobNumber, (int) pid, String.join(" ", parsed.command));
-                backgroundJobs.put(jobNumber, job);
-                System.out.println("[" + jobNumber + "] " + pid);
-                System.out.flush();
-
-                // Start a thread to monitor the process
-                new Thread(() -> {
-                    try {
-                        process.waitFor();
-                        job.status = "Done";
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                }).start();
-            } else {
-                // Wait for foreground process to complete
-                process.waitFor();
-            }
-
-        } catch (Exception e) {
-            System.err.println("Error executing command: " + e.getMessage());
-        }
-    }
-
-    private static void handleEcho(List<String> args) {
-        // Skip the "echo" command itself
-        List<String> echoArgs = args.subList(1, args.size());
-        System.out.println(String.join(" ", echoArgs));
-    }
-
-    private static void handleType(List<String> args) {
-        if (args.size() < 2) {
-            System.err.println("type: missing argument");
-            return;
-        }
-
-        String command = args.get(1);
-
-        if (BUILTINS.contains(command)) {
-            System.out.println(command + " is a shell builtin");
-        } else {
-            // Check if it's an external command in PATH
-            String pathEnv = System.getenv("PATH");
-            if (pathEnv != null) {
-                String[] paths = pathEnv.split(":");
-                for (String path : paths) {
-                    File file = new File(path, command);
-                    if (file.exists() && file.isFile() && file.canExecute()) {
-                        System.out.println(command + " is " + file.getAbsolutePath());
-                        return;
-                    }
-                }
-            }
-            System.out.println(command + ": not found");
-        }
-    }
-
-    private static void handleExit(List<String> args) {
-        int exitCode = 0;
-        if (args.size() > 1) {
+            ParsedCommand cmd;
             try {
-                exitCode = Integer.parseInt(args.get(1));
-            } catch (NumberFormatException e) {
-                exitCode = 1;
+                cmd = parseRedirection(tokens);
+            } catch (IllegalArgumentException e) {
+                System.out.println(e.getMessage());
+                continue;
+            }
+            if (cmd.args.isEmpty()) continue;
+
+            try {
+                execute(cmd);
+            } catch (Exception e) {
+                System.err.println(cmd.args.get(0) + ": " + e.getMessage());
             }
         }
-        System.exit(exitCode);
     }
 
-    private static void handlePwd() {
-        System.out.println(System.getProperty("user.dir"));
-    }
+    // =========================================================
+    // Tokenizer — handles single quotes, double quotes, backslash
+    // escapes, and splits out redirection operators:
+    // > / 1> / 2>  and  >> / 1>> / 2>>
+    // =========================================================
+    private static List<String> tokenize(String line) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inSingleQuotes = false;
+        boolean inDoubleQuotes = false;
+        boolean hasToken = false;
 
-    private static void handleCd(List<String> args) {
-        String targetDir;
-        if (args.size() < 2) {
-            targetDir = System.getProperty("user.home");
-        } else {
-            targetDir = args.get(1);
+        int i = 0;
+        int n = line.length();
+
+        while (i < n) {
+            char c = line.charAt(i);
+
+            if (inSingleQuotes) {
+                if (c == '\'') {
+                    inSingleQuotes = false;
+                } else {
+                    current.append(c);
+                }
+                i++;
+                continue;
+            }
+
+            if (inDoubleQuotes) {
+                if (c == '"') {
+                    inDoubleQuotes = false;
+                } else if (c == '\\' && i + 1 < n && isDoubleQuoteEscapable(line.charAt(i + 1))) {
+                    current.append(line.charAt(i + 1));
+                    i++;
+                } else {
+                    current.append(c);
+                }
+                i++;
+                continue;
+            }
+
+            switch (c) {
+                case '\'' -> {
+                    inSingleQuotes = true;
+                    hasToken = true;
+                    i++;
+                }
+                case '"' -> {
+                    inDoubleQuotes = true;
+                    hasToken = true;
+                    i++;
+                }
+                case '\\' -> {
+                    if (i + 1 < n) {
+                        current.append(line.charAt(i + 1));
+                        hasToken = true;
+                        i += 2;
+                    } else {
+                        i++;
+                    }
+                }
+                case ' ', '\t' -> {
+                    if (hasToken) {
+                        tokens.add(current.toString());
+                        current.setLength(0);
+                        hasToken = false;
+                    }
+                    i++;
+                }
+                case '>' -> {
+                    // Determine an optional fd prefix ("1" or "2") that was
+                    // just accumulated with no space before this '>', then
+                    // check if a second '>' immediately follows for append mode.
+                    String currentStr = current.toString();
+                    String fdPrefix = "";
+                    if (hasToken && (currentStr.equals("1") || currentStr.equals("2"))) {
+                        fdPrefix = currentStr;
+                        current.setLength(0);
+                        hasToken = false;
+                    } else if (hasToken) {
+                        tokens.add(current.toString());
+                        current.setLength(0);
+                        hasToken = false;
+                    }
+
+                    boolean append = (i + 1 < n && line.charAt(i + 1) == '>');
+                    tokens.add(fdPrefix + (append ? ">>" : ">"));
+                    i += append ? 2 : 1;
+                }
+                default -> {
+                    current.append(c);
+                    hasToken = true;
+                    i++;
+                }
+            }
         }
 
-        File dir = new File(targetDir);
-        if (!dir.exists() || !dir.isDirectory()) {
-            System.err.println("cd: " + targetDir + ": No such file or directory");
-            return;
+        if (inSingleQuotes || inDoubleQuotes) {
+            throw new IllegalArgumentException("syntax error: unterminated quote");
+        }
+        if (hasToken) {
+            tokens.add(current.toString());
+        }
+
+        return tokens;
+    }
+
+    private static boolean isDoubleQuoteEscapable(char c) {
+        return c == '\\' || c == '"' || c == '$' || c == '`' || c == '\n';
+    }
+
+    // =========================================================
+    // Redirection parsing
+    // =========================================================
+    private static class ParsedCommand {
+        List<String> args;
+        String stdoutFile;
+        String stderrFile;
+        boolean appendStdout;
+        boolean appendStderr;
+
+        ParsedCommand(List<String> args, String stdoutFile, String stderrFile,
+                      boolean appendStdout, boolean appendStderr) {
+            this.args = args;
+            this.stdoutFile = stdoutFile;
+            this.stderrFile = stderrFile;
+            this.appendStdout = appendStdout;
+            this.appendStderr = appendStderr;
+        }
+    }
+
+    private static ParsedCommand parseRedirection(List<String> tokens) {
+        List<String> args = new ArrayList<>();
+        String stdoutFile = null;
+        String stderrFile = null;
+        boolean appendStdout = false;
+        boolean appendStderr = false;
+
+        for (int i = 0; i < tokens.size(); i++) {
+            String token = tokens.get(i);
+            if (token.equals(">") || token.equals("1>") || token.equals(">>") || token.equals("1>>")) {
+                if (i + 1 >= tokens.size()) {
+                    throw new IllegalArgumentException("syntax error near unexpected token `newline'");
+                }
+                stdoutFile = tokens.get(i + 1);
+                appendStdout = token.equals(">>") || token.equals("1>>");
+                i++; // consume the filename token too
+            } else if (token.equals("2>") || token.equals("2>>")) {
+                if (i + 1 >= tokens.size()) {
+                    throw new IllegalArgumentException("syntax error near unexpected token `newline'");
+                }
+                stderrFile = tokens.get(i + 1);
+                appendStderr = token.equals("2>>");
+                i++;
+            } else {
+                args.add(token);
+            }
+        }
+
+        return new ParsedCommand(args, stdoutFile, stderrFile, appendStdout, appendStderr);
+    }
+
+    // =========================================================
+    // Execution
+    // =========================================================
+    private static void execute(ParsedCommand cmd) throws Exception {
+        String name = cmd.args.get(0);
+        if (BUILTINS.contains(name)) {
+            runBuiltin(cmd);
+        } else {
+            runExternal(cmd);
+        }
+    }
+
+    private static void runBuiltin(ParsedCommand cmd) throws Exception {
+        PrintStream out = System.out;
+        PrintStream err = System.err;
+        FileOutputStream outFos = null;
+        FileOutputStream errFos = null;
+
+        try {
+            if (cmd.stdoutFile != null) {
+                outFos = new FileOutputStream(resolvePath(cmd.stdoutFile), cmd.appendStdout); // create; truncate or append
+                out = new PrintStream(outFos);
+            }
+            if (cmd.stderrFile != null) {
+                errFos = new FileOutputStream(resolvePath(cmd.stderrFile), cmd.appendStderr); // create; truncate or append
+                err = new PrintStream(errFos);
+            }
+
+            String name = cmd.args.get(0);
+            switch (name) {
+                case "exit" -> {
+                    int code = cmd.args.size() > 1 ? Integer.parseInt(cmd.args.get(1)) : 0;
+                    System.exit(code);
+                }
+                case "echo" -> out.println(String.join(" ", cmd.args.subList(1, cmd.args.size())));
+                case "pwd" -> out.println(System.getProperty("user.dir"));
+                case "cd" -> handleCd(cmd.args.size() > 1 ? cmd.args.get(1) : System.getenv("HOME"), err);
+                case "type" -> handleType(cmd.args.size() > 1 ? cmd.args.get(1) : "", out, err);
+                case "jobs" -> { /* no background jobs yet — empty implementation for this stage */ }
+            }
+        } finally {
+            if (outFos != null) outFos.close();
+            if (errFos != null) errFos.close();
+        }
+    }
+
+    private static void handleCd(String path, PrintStream err) {
+        if (path == null || path.equals("~")) {
+            path = System.getenv("HOME");
+        }
+
+        File dir = new File(path);
+        if (!dir.isAbsolute()) {
+            dir = new File(System.getProperty("user.dir"), path);
         }
 
         try {
-            System.setProperty("user.dir", dir.getCanonicalPath());
+            dir = dir.getCanonicalFile();
         } catch (IOException e) {
-            System.err.println("cd: " + targetDir + ": " + e.getMessage());
+            err.println("cd: " + path + ": No such file or directory");
+            return;
+        }
+
+        if (!dir.exists() || !dir.isDirectory()) {
+            err.println("cd: " + path + ": No such file or directory");
+            return;
+        }
+
+        System.setProperty("user.dir", dir.getAbsolutePath());
+    }
+
+    private static void handleType(String name, PrintStream out, PrintStream err) {
+        if (BUILTINS.contains(name)) {
+            out.println(name + " is a shell builtin");
+            return;
+        }
+
+        String path = findExecutable(name);
+        if (path != null) {
+            out.println(name + " is " + path);
+        } else {
+            err.println(name + ": not found");
         }
     }
 
-    private static void handleJobs() {
-        // Clean up completed jobs
-        backgroundJobs.values().removeIf(job -> "Done".equals(job.status));
+    private static String findExecutable(String name) {
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv == null) return null;
 
-        // Print remaining jobs
-        for (BackgroundJob job : backgroundJobs.values()) {
-            System.out.println("[" + job.jobNumber + "]   " + job.status + "   " + job.command);
-        }
-    }
-
-    private static void ensureParentDirectory(File file) throws IOException {
-        File parent = file.getParentFile();
-        if (parent != null && !parent.exists()) {
-            Files.createDirectories(parent.toPath());
-        }
-    }
-
-    private static CommandParsed parseCommand(String commandLine) {
-        CommandParsed parsed = new CommandParsed();
-
-        // Check for background job (&)
-        Pattern backgroundPattern = Pattern.compile("&\\s*$");
-        Matcher backgroundMatcher = backgroundPattern.matcher(commandLine);
-        if (backgroundMatcher.find()) {
-            parsed.runInBackground = true;
-            commandLine = commandLine.substring(0, backgroundMatcher.start()).trim();
-        }
-
-        // Handle 2>> first (must be before 2>)
-        Pattern stderr2AppendPattern = Pattern.compile("2>>\\s+([^\\s]+)(?:\\s|$)");
-        Matcher stderrMatcher = stderr2AppendPattern.matcher(commandLine);
-        if (stderrMatcher.find()) {
-            parsed.stderrFile = stderrMatcher.group(1);
-            parsed.stderrAppend = true;
-            commandLine = commandLine.substring(0, stderrMatcher.start()) + 
-                         commandLine.substring(stderrMatcher.end());
-        }
-
-        // Handle 2> (redirect stderr, overwrite)
-        Pattern stderr1Pattern = Pattern.compile("2>\\s+([^\\s]+)(?:\\s|$)");
-        stderrMatcher = stderr1Pattern.matcher(commandLine);
-        if (stderrMatcher.find()) {
-            parsed.stderrFile = stderrMatcher.group(1);
-            parsed.stderrAppend = false;
-            commandLine = commandLine.substring(0, stderrMatcher.start()) + 
-                         commandLine.substring(stderrMatcher.end());
-        }
-
-        // Handle >> (stdout append)
-        Pattern stdoutAppendPattern = Pattern.compile(">>\\s+([^\\s]+)(?:\\s|$)");
-        Matcher stdoutMatcher = stdoutAppendPattern.matcher(commandLine);
-        if (stdoutMatcher.find()) {
-            parsed.stdoutFile = stdoutMatcher.group(1);
-            parsed.stdoutAppend = true;
-            commandLine = commandLine.substring(0, stdoutMatcher.start()) + 
-                         commandLine.substring(stdoutMatcher.end());
-        }
-
-        // Handle > (stdout overwrite)
-        Pattern stdoutPattern = Pattern.compile(">\\s+([^\\s]+)(?:\\s|$)");
-        stdoutMatcher = stdoutPattern.matcher(commandLine);
-        if (stdoutMatcher.find()) {
-            parsed.stdoutFile = stdoutMatcher.group(1);
-            parsed.stdoutAppend = false;
-            commandLine = commandLine.substring(0, stdoutMatcher.start()) + 
-                         commandLine.substring(stdoutMatcher.end());
-        }
-
-        // Parse the remaining command
-        commandLine = commandLine.trim();
-        if (commandLine.isEmpty()) {
-            return null;
-        }
-
-        parsed.command = parseCommandArguments(commandLine);
-        return parsed;
-    }
-
-    private static List<String> parseCommandArguments(String commandLine) {
-        List<String> args = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean inQuotes = false;
-
-        for (int i = 0; i < commandLine.length(); i++) {
-            char c = commandLine.charAt(i);
-
-            if (c == '"' || c == '\'') {
-                inQuotes = !inQuotes;
-            } else if (c == ' ' && !inQuotes) {
-                if (current.length() > 0) {
-                    args.add(current.toString());
-                    current = new StringBuilder();
-                }
-            } else {
-                current.append(c);
+        for (String dir : pathEnv.split(File.pathSeparator)) {
+            File candidate = new File(dir, name);
+            if (candidate.isFile() && candidate.canExecute()) {
+                return candidate.getAbsolutePath();
             }
         }
-
-        if (current.length() > 0) {
-            args.add(current.toString());
-        }
-
-        return args;
+        return null;
     }
 
-    static class CommandParsed {
-        List<String> command;
-        String stdoutFile;
-        boolean stdoutAppend;
-        String stderrFile;
-        boolean stderrAppend;
-        boolean runInBackground;
-
-        CommandParsed() {
-            this.stdoutAppend = false;
-            this.stderrAppend = false;
-            this.runInBackground = false;
+    private static File resolvePath(String path) {
+        File f = new File(path);
+        if (!f.isAbsolute()) {
+            f = new File(System.getProperty("user.dir"), path);
         }
+        return f;
     }
 
-    static class BackgroundJob {
-        int jobNumber;
-        int pid;
-        String command;
-        String status;
-
-        BackgroundJob(int jobNumber, int pid, String command) {
-            this.jobNumber = jobNumber;
-            this.pid = pid;
-            this.command = command;
-            this.status = "Running";
+    private static void runExternal(ParsedCommand cmd) throws IOException, InterruptedException {
+        String executable = findExecutable(cmd.args.get(0));
+        if (executable == null) {
+            PrintStream err = System.err;
+            FileOutputStream errFos = null;
+            try {
+                if (cmd.stderrFile != null) {
+                    errFos = new FileOutputStream(resolvePath(cmd.stderrFile), cmd.appendStderr);
+                    err = new PrintStream(errFos);
+                }
+                err.println(cmd.args.get(0) + ": command not found");
+            } finally {
+                if (errFos != null) errFos.close();
+            }
+            return;
         }
+
+        ProcessBuilder pb = new ProcessBuilder(cmd.args);
+        pb.directory(new File(System.getProperty("user.dir")));
+        pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+
+        if (cmd.stdoutFile != null) {
+            File f = resolvePath(cmd.stdoutFile);
+            pb.redirectOutput(cmd.appendStdout ? ProcessBuilder.Redirect.appendTo(f) : ProcessBuilder.Redirect.to(f));
+        } else {
+            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+        }
+
+        if (cmd.stderrFile != null) {
+            File f = resolvePath(cmd.stderrFile);
+            pb.redirectError(cmd.appendStderr ? ProcessBuilder.Redirect.appendTo(f) : ProcessBuilder.Redirect.to(f));
+        } else {
+            pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+        }
+
+        Process process = pb.start();
+        process.waitFor();
     }
 }
