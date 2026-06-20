@@ -4,12 +4,25 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class Main {
 
-    private static final Map<Integer, Boolean> jobs = new ConcurrentHashMap<>(); // jobNum -> placeholder
+    static class Job {
+        final int number;
+        final List<Process> processes;
+        final String commandLine;
+
+        Job(int number, List<Process> processes, String commandLine) {
+            this.number = number;
+            this.processes = processes;
+            this.commandLine = commandLine;
+        }
+    }
+
+    private static final Map<Integer, Job> jobs = new ConcurrentHashMap<>();
     private static final LinkedList<Integer> jobStack = new LinkedList<>(); // most recent first
     private static final ConcurrentLinkedQueue<String> pendingNotifications = new ConcurrentLinkedQueue<>();
 
@@ -17,8 +30,6 @@ public class Main {
         Scanner scanner = new Scanner(System.in);
 
         while (true) {
-            // Print any "Done" notifications for background jobs that
-            // finished since the last prompt, BEFORE showing the prompt.
             drainNotifications();
 
             System.out.print("$ ");
@@ -42,7 +53,12 @@ public class Main {
             if (background) {
                 runPipelineBackground(stageStrings, normalizeCommand(stageStrings));
             } else if (stageStrings.size() == 1) {
-                runSingleCommand(stageStrings.get(0));
+                List<String> tokens = tokenize(stageStrings.get(0));
+                if (!tokens.isEmpty() && tokens.get(0).equals("jobs")) {
+                    runJobsBuiltin();
+                } else {
+                    runSingleCommand(stageStrings.get(0));
+                }
             } else {
                 runPipeline(stageStrings);
             }
@@ -53,6 +69,26 @@ public class Main {
         String line;
         while ((line = pendingNotifications.poll()) != null) {
             System.out.println(line);
+        }
+    }
+
+    // ---------- "jobs" builtin ----------
+
+    private static void runJobsBuiltin() {
+        // Snapshot under lock so the list and sign markers are consistent
+        // even if a background job finishes concurrently.
+        TreeMap<Integer, Job> sorted;
+        synchronized (Main.class) {
+            sorted = new TreeMap<>(jobs);
+            for (Map.Entry<Integer, Job> entry : sorted.entrySet()) {
+                int jobNum = entry.getKey();
+                char sign = signFor(jobNum);
+                String line = String.format(
+                        "[%d]%c  %-21s%s &",
+                        jobNum, sign, "Running", entry.getValue().commandLine
+                );
+                System.out.println(line);
+            }
         }
     }
 
@@ -94,9 +130,10 @@ public class Main {
 
             int jobNum = nextJobNumber();
             long pid = processes.get(processes.size() - 1).pid();
+            Job job = new Job(jobNum, processes, commandLine);
 
             synchronized (Main.class) {
-                jobs.put(jobNum, Boolean.TRUE);
+                jobs.put(jobNum, job);
                 jobStack.addFirst(jobNum);
             }
 
