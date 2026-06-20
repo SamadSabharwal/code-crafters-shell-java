@@ -1,30 +1,26 @@
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class Main {
 
-    private static final Map<Integer, Job> jobs = new ConcurrentHashMap<>();
-
-    static class Job {
-        final int number;
-        final List<Process> processes;
-        final String commandLine;
-
-        Job(int number, List<Process> processes, String commandLine) {
-            this.number = number;
-            this.processes = processes;
-            this.commandLine = commandLine;
-        }
-    }
+    private static final Map<Integer, Boolean> jobs = new ConcurrentHashMap<>(); // jobNum -> placeholder
+    private static final LinkedList<Integer> jobStack = new LinkedList<>(); // most recent first
+    private static final ConcurrentLinkedQueue<String> pendingNotifications = new ConcurrentLinkedQueue<>();
 
     public static void main(String[] args) throws Exception {
         Scanner scanner = new Scanner(System.in);
 
         while (true) {
+            // Print any "Done" notifications for background jobs that
+            // finished since the last prompt, BEFORE showing the prompt.
+            drainNotifications();
+
             System.out.print("$ ");
             if (!scanner.hasNextLine()) {
                 break;
@@ -44,12 +40,19 @@ public class Main {
             List<String> stageStrings = splitOnPipe(trimmed);
 
             if (background) {
-                runPipelineBackground(stageStrings, trimmed);
+                runPipelineBackground(stageStrings, normalizeCommand(stageStrings));
             } else if (stageStrings.size() == 1) {
                 runSingleCommand(stageStrings.get(0));
             } else {
                 runPipeline(stageStrings);
             }
+        }
+    }
+
+    private static void drainNotifications() {
+        String line;
+        while ((line = pendingNotifications.poll()) != null) {
+            System.out.println(line);
         }
     }
 
@@ -63,6 +66,16 @@ public class Main {
         return n;
     }
 
+    private static synchronized char signFor(int jobNum) {
+        if (!jobStack.isEmpty() && jobStack.get(0) == jobNum) {
+            return '+';
+        }
+        if (jobStack.size() >= 2 && jobStack.get(1) == jobNum) {
+            return '-';
+        }
+        return ' ';
+    }
+
     // ---------- Background pipeline execution ----------
 
     private static void runPipelineBackground(List<String> stageStrings, String commandLine) {
@@ -71,7 +84,6 @@ public class Main {
             return;
         }
 
-        // Last stage's stdout still goes to the terminal so output is visible.
         builders.get(builders.size() - 1).redirectOutput(ProcessBuilder.Redirect.INHERIT);
         for (ProcessBuilder pb : builders) {
             pb.redirectError(ProcessBuilder.Redirect.INHERIT);
@@ -82,23 +94,35 @@ public class Main {
 
             int jobNum = nextJobNumber();
             long pid = processes.get(processes.size() - 1).pid();
-            Job job = new Job(jobNum, processes, commandLine);
-            jobs.put(jobNum, job);
 
-            // Bash prints "[N] PID" immediately when a background job starts.
+            synchronized (Main.class) {
+                jobs.put(jobNum, Boolean.TRUE);
+                jobStack.addFirst(jobNum);
+            }
+
             System.out.println("[" + jobNum + "] " + pid);
 
-            // Watch the job on a separate thread so its number is freed
-            // (recycled) as soon as the job finishes, without blocking the shell.
             Thread monitor = new Thread(() -> {
+                int exitCode = 0;
                 try {
                     for (Process p : processes) {
-                        p.waitFor();
+                        exitCode = p.waitFor();
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                } finally {
+                }
+
+                char sign = signFor(jobNum);
+                String status = (exitCode == 0) ? "Done" : ("Exit " + exitCode);
+                String notification = String.format(
+                        "[%d]%c  %-21s%s",
+                        jobNum, sign, status, commandLine
+                );
+                pendingNotifications.add(notification);
+
+                synchronized (Main.class) {
                     jobs.remove(jobNum);
+                    jobStack.remove(Integer.valueOf(jobNum));
                 }
             });
             monitor.setDaemon(true);
@@ -204,5 +228,13 @@ public class Main {
             }
         }
         return tokens;
+    }
+
+    private static String normalizeCommand(List<String> stageStrings) {
+        List<String> normalizedStages = new ArrayList<>();
+        for (String stage : stageStrings) {
+            normalizedStages.add(String.join(" ", tokenize(stage)));
+        }
+        return String.join(" | ", normalizedStages);
     }
 }
