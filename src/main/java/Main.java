@@ -12,9 +12,6 @@ public class Main {
             Arrays.asList("echo", "exit", "type", "pwd", "cd")
     );
 
-    // current working directory (simulated)
-    static String currentDir = System.getProperty("user.dir");
-
     public static void main(String[] args) throws Exception {
         Scanner sc = new Scanner(System.in);
 
@@ -54,6 +51,7 @@ public class Main {
                     System.out.println(target + " is a shell builtin");
                 } else {
                     String path = findExecutable(target);
+
                     if (path != null) {
                         System.out.println(target + " is " + path);
                     } else {
@@ -65,38 +63,11 @@ public class Main {
 
             // ================= PWD =================
             if (command.equals("pwd")) {
-                System.out.println(currentDir);
+                System.out.println(System.getProperty("user.dir"));
                 continue;
             }
 
-            // ================= CD (ABS + RELATIVE) =================
-            if (command.equals("cd")) {
-                if (parts.length < 2) continue;
-
-                String target = parts[1];
-
-                String newPath;
-
-                if (target.startsWith("/")) {
-                    // absolute path
-                    newPath = target;
-                } else {
-                    // relative path → resolve manually
-                    newPath = resolvePath(currentDir, target);
-                }
-
-                File dir = new File(newPath);
-
-                if (dir.exists() && dir.isDirectory()) {
-                    currentDir = dir.getAbsolutePath();
-                } else {
-                    System.out.println("cd: " + target + ": No such file or directory");
-                }
-
-                continue;
-            }
-
-            // ================= EXECUTION =================
+            // ================= EXECUTION (IMPORTANT FIX) =================
             String execPath = findExecutable(command);
 
             if (execPath == null) {
@@ -106,13 +77,20 @@ public class Main {
 
             try {
                 List<String> cmd = new ArrayList<>();
-                cmd.add(execPath);
+
+                /*
+                 ✔ CRITICAL FIX:
+                 DO NOT use execPath as argv[0]
+                 Use command name only
+                */
+                cmd.add(command);
 
                 for (int i = 1; i < parts.length; i++) {
                     cmd.add(parts[i]);
                 }
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
+
                 pb.inheritIO();
 
                 Process process = pb.start();
@@ -126,48 +104,7 @@ public class Main {
         sc.close();
     }
 
-    // ================= PATH RESOLUTION =================
-    static String resolvePath(String base, String target) {
-
-        String[] baseParts = base.split("/");
-        List<String> stack = new ArrayList<>();
-
-        // rebuild base path stack
-        for (String part : baseParts) {
-            if (!part.isEmpty()) stack.add(part);
-        }
-
-        String[] targetParts = target.split("/");
-
-        for (String part : targetParts) {
-
-            if (part.equals("") || part.equals(".")) {
-                continue;
-            }
-
-            if (part.equals("..")) {
-                if (!stack.isEmpty()) {
-                    stack.remove(stack.size() - 1);
-                }
-            } else {
-                stack.add(part);
-            }
-        }
-
-        StringBuilder result = new StringBuilder();
-        result.append("/");
-
-        for (int i = 0; i < stack.size(); i++) {
-            result.append(stack.get(i));
-            if (i != stack.size() - 1) {
-                result.append("/");
-            }
-        }
-
-        return result.toString();
-    }
-
-    // ================= EXEC SEARCH =================
+    // ================= PATH SEARCH =================
     static String findExecutable(String target) {
         String pathEnv = System.getenv("PATH");
         if (pathEnv == null) return null;
