@@ -15,7 +15,6 @@ import java.util.regex.Pattern;
 
 public class Main {
     private static Map<Integer, BackgroundJob> backgroundJobs = new LinkedHashMap<>();
-    private static int jobCounter = 1;
     private static final Set<String> BUILTINS = new HashSet<>(Arrays.asList(
         "echo", "type", "exit", "pwd", "cd", "jobs"
     ));
@@ -155,11 +154,10 @@ public class Main {
     }
 
     private static void handleJobs() {
-        // Print all running background jobs
+        // Print all background jobs (both running and done)
         for (BackgroundJob job : backgroundJobs.values()) {
-            if ("Running".equals(job.status)) {
-                System.out.println("[" + job.jobNumber + "]   " + job.status + "   " + job.command);
-            }
+            String marker = job.isLatest ? "+" : " ";
+            System.out.printf("[%d]%s  %-20s %s &%n", job.jobNumber, marker, job.status, job.command);
         }
     }
 
@@ -170,6 +168,16 @@ public class Main {
             jobNum++;
         }
         return jobNum;
+    }
+
+    // Mark all jobs as not latest, then mark the given job as latest
+    private static void updateLatestJob(int jobNumber) {
+        for (BackgroundJob job : backgroundJobs.values()) {
+            job.isLatest = false;
+        }
+        if (backgroundJobs.containsKey(jobNumber)) {
+            backgroundJobs.get(jobNumber).isLatest = true;
+        }
     }
 
     // Executes a normal external command
@@ -188,6 +196,7 @@ public class Main {
                 int jobNumber = getNextJobNumber();
                 BackgroundJob job = new BackgroundJob(jobNumber, (int) pid, String.join(" ", command));
                 backgroundJobs.put(jobNumber, job);
+                updateLatestJob(jobNumber);
                 System.out.println("[" + jobNumber + "] " + pid);
                 System.out.flush();
 
@@ -276,6 +285,7 @@ public class Main {
                 int jobNumber = getNextJobNumber();
                 BackgroundJob job = new BackgroundJob(jobNumber, (int) pid, line);
                 backgroundJobs.put(jobNumber, job);
+                updateLatestJob(jobNumber);
                 System.out.println("[" + jobNumber + "] " + pid);
                 System.out.flush();
 
@@ -315,7 +325,8 @@ public class Main {
         for (Map.Entry<Integer, BackgroundJob> entry : backgroundJobs.entrySet()) {
             BackgroundJob job = entry.getValue();
             if ("Done".equals(job.status) && !job.notified) {
-                System.out.println("[" + job.jobNumber + "]+  Done                 " + job.command);
+                String marker = job.isLatest ? "+" : " ";
+                System.out.printf("[%d]%s  Done                 %s%n", job.jobNumber, marker, job.command);
                 System.out.flush();
                 job.notified = true;
                 completedJobNumbers.add(entry.getKey());
@@ -355,6 +366,7 @@ public class Main {
         String command;
         String status;
         boolean notified;
+        boolean isLatest;
 
         BackgroundJob(int jobNumber, int pid, String command) {
             this.jobNumber = jobNumber;
@@ -362,6 +374,7 @@ public class Main {
             this.command = command;
             this.status = "Running";
             this.notified = false;
+            this.isLatest = false;
         }
     }
 }
