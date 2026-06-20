@@ -11,6 +11,23 @@ import java.util.Set;
 public class Main {
     private static final Set<String> BUILTINS = Set.of("exit", "echo", "type", "pwd", "cd", "jobs");
 
+    private static int nextJobId = 1;
+    private static final List<Job> jobs = new ArrayList<>();
+
+    private static class Job {
+        int id;
+        long pid;
+        Process process;
+        String command;
+
+        Job(int id, long pid, Process process, String command) {
+            this.id = id;
+            this.pid = pid;
+            this.process = process;
+            this.command = command;
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
 
@@ -49,8 +66,8 @@ public class Main {
 
     // =========================================================
     // Tokenizer — handles single quotes, double quotes, backslash
-    // escapes, and splits out redirection operators:
-    // > / 1> / 2>  and  >> / 1>> / 2>>
+    // escapes, redirection operators (> / 1> / 2> / >> / 1>> / 2>>),
+    // and the background operator (&)
     // =========================================================
     private static List<String> tokenize(String line) {
         List<String> tokens = new ArrayList<>();
@@ -136,6 +153,15 @@ public class Main {
                     tokens.add(fdPrefix + (append ? ">>" : ">"));
                     i += append ? 2 : 1;
                 }
+                case '&' -> {
+                    if (hasToken) {
+                        tokens.add(current.toString());
+                        current.setLength(0);
+                        hasToken = false;
+                    }
+                    tokens.add("&");
+                    i++;
+                }
                 default -> {
                     current.append(c);
                     hasToken = true;
@@ -159,7 +185,7 @@ public class Main {
     }
 
     // =========================================================
-    // Redirection parsing
+    // Redirection / background parsing
     // =========================================================
     private static class ParsedCommand {
         List<String> args;
@@ -167,14 +193,16 @@ public class Main {
         String stderrFile;
         boolean appendStdout;
         boolean appendStderr;
+        boolean background;
 
         ParsedCommand(List<String> args, String stdoutFile, String stderrFile,
-                      boolean appendStdout, boolean appendStderr) {
+                      boolean appendStdout, boolean appendStderr, boolean background) {
             this.args = args;
             this.stdoutFile = stdoutFile;
             this.stderrFile = stderrFile;
             this.appendStdout = appendStdout;
             this.appendStderr = appendStderr;
+            this.background = background;
         }
     }
 
@@ -206,7 +234,13 @@ public class Main {
             }
         }
 
-        return new ParsedCommand(args, stdoutFile, stderrFile, appendStdout, appendStderr);
+        boolean background = false;
+        if (!args.isEmpty() && args.get(args.size() - 1).equals("&")) {
+            args.remove(args.size() - 1);
+            background = true;
+        }
+
+        return new ParsedCommand(args, stdoutFile, stderrFile, appendStdout, appendStderr, background);
     }
 
     // =========================================================
@@ -351,6 +385,14 @@ public class Main {
         }
 
         Process process = pb.start();
-        process.waitFor();
+
+        if (cmd.background) {
+            int jobId = nextJobId++;
+            Job job = new Job(jobId, process.pid(), process, String.join(" ", cmd.args));
+            jobs.add(job);
+            System.out.println("[" + jobId + "] " + process.pid());
+        } else {
+            process.waitFor();
+        }
     }
 }
