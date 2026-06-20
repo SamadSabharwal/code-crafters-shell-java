@@ -1,57 +1,68 @@
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Scanner;
+import java.util.Set;
 
 public class Main {
+
+    // list of builtins
+    static Set<String> builtins = new HashSet<>(
+            Arrays.asList("echo", "exit", "type")
+    );
 
     public static void main(String[] args) throws Exception {
         Scanner sc = new Scanner(System.in);
 
         while (true) {
-            // prompt
             System.out.print("$ ");
 
             if (!sc.hasNextLine()) {
-                break; // EOF (Ctrl+D)
+                break;
             }
 
             String input = sc.nextLine().trim();
 
-            // skip empty input
             if (input.isEmpty()) {
                 continue;
             }
 
+            String[] parts = input.split("\\s+");
+            String command = parts[0];
+
             // ===== BUILTIN: exit =====
-            if (input.equals("exit")) {
+            if (command.equals("exit")) {
                 System.exit(0);
             }
 
-            // ===== split command =====
-            String[] cmd = input.split("\\s+");
-
-            try {
-                // build process
-                ProcessBuilder pb = new ProcessBuilder(cmd);
-                pb.redirectErrorStream(true);
-
-                Process process = pb.start();
-
-                // print output
-                BufferedReader reader =
-                        new BufferedReader(new InputStreamReader(process.getInputStream()));
-
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    System.out.println(line);
+            // ===== BUILTIN: type =====
+            if (command.equals("type")) {
+                if (parts.length < 2) {
+                    // no argument provided
+                    continue;
                 }
 
-                process.waitFor();
+                String target = parts[1];
 
-            } catch (Exception e) {
-                // command not found case
-                System.out.println(cmd[0] + ": command not found");
+                if (builtins.contains(target)) {
+                    System.out.println(target + " is a shell builtin");
+                } else {
+                    System.out.println(target + ": not found");
+                }
+                continue;
             }
+
+            // ===== BUILTIN: echo =====
+            if (command.equals("echo")) {
+                for (int i = 1; i < parts.length; i++) {
+                    System.out.print(parts[i]);
+                    if (i != parts.length - 1) System.out.print(" ");
+                }
+                System.out.println();
+                continue;
+            }
+
+            // ===== unknown command =====
+            System.out.println(command + ": not found");
         }
 
         sc.close();
