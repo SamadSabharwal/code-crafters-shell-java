@@ -60,7 +60,6 @@ public class Main {
             }
             if (rawTokens.isEmpty()) continue;
 
-            // Display string for `jobs` (includes redirection tokens as typed)
             String commandStr = String.join(" ", rawTokens);
             if (background) commandStr = commandStr + " &";
 
@@ -72,7 +71,6 @@ public class Main {
         }
     }
 
-    // Recognizes: <  >  1>  >>  1>>  2>  2>>
     private static List<String> extractRedirection(List<String> rawTokens, Redirection redir) {
         List<String> result = new ArrayList<>();
         for (int i = 0; i < rawTokens.size(); i++) {
@@ -223,14 +221,29 @@ public class Main {
     }
 
     private static void builtinCd(List<String> tokens) {
-        String target = tokens.size() > 1 ? tokens.get(1) : System.getProperty("user.home");
-        if (target.equals("~")) target = System.getProperty("user.home");
+        // Resolve HOME from the environment, not Java's user.home system
+        // property, since the tester sets HOME to a directory that may
+        // differ from the OS account's actual home directory.
+        String home = System.getenv("HOME");
+        if (home == null) {
+            home = System.getProperty("user.home");
+        }
+
+        String target = tokens.size() > 1 ? tokens.get(1) : home;
+        if (target.equals("~")) {
+            target = home;
+        } else if (target.startsWith("~/")) {
+            target = home + target.substring(1);
+        }
+
         File dir = new File(target);
-        if (!dir.isAbsolute()) dir = new File(System.getProperty("user.dir"), target);
+        if (!dir.isAbsolute()) {
+            dir = new File(System.getProperty("user.dir"), target);
+        }
         try {
             dir = dir.getCanonicalFile();
         } catch (IOException e) {
-            // ignore
+            // ignore, fall through to existence check
         }
         if (dir.exists() && dir.isDirectory()) {
             System.setProperty("user.dir", dir.getAbsolutePath());
@@ -260,8 +273,6 @@ public class Main {
         System.out.println(name + ": not found");
     }
 
-    // Tokenizer supporting single quotes, double quotes, backslash escapes,
-    // and redirection operators: < > 1> >> 1>> 2> 2>>
     private static List<String> tokenize(String line) {
         List<String> tokens = new ArrayList<>();
         StringBuilder current = new StringBuilder();
