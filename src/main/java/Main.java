@@ -53,7 +53,6 @@ public class Main {
                     System.out.println(target + " is a shell builtin");
                 } else {
                     String path = findExecutable(target);
-
                     if (path != null) {
                         System.out.println(target + " is " + path);
                     } else {
@@ -76,9 +75,18 @@ public class Main {
                 String target = parts[1];
                 String newPath;
 
-                if (target.startsWith("/")) {
+                String home = System.getenv("HOME");
+
+                if (target.equals("~")) {
+                    newPath = home;
+                }
+                else if (target.startsWith("~/")) {
+                    newPath = home + target.substring(1);
+                }
+                else if (target.startsWith("/")) {
                     newPath = target;
-                } else {
+                }
+                else {
                     newPath = resolvePath(currentDir, target);
                 }
 
@@ -89,10 +97,11 @@ public class Main {
                 } else {
                     System.out.println("cd: " + target + ": No such file or directory");
                 }
+
                 continue;
             }
 
-            // ================= EXECUTION (FINAL FIX) =================
+            // ================= EXECUTION =================
             String execPath = findExecutable(command);
 
             if (execPath == null) {
@@ -103,8 +112,7 @@ public class Main {
             try {
                 List<String> cmd = new ArrayList<>();
 
-                // ✔ CRITICAL FIX:
-                // ALWAYS use command name, NOT full path
+                // IMPORTANT: use command name (not full path)
                 cmd.add(command);
 
                 for (int i = 1; i < parts.length; i++) {
