@@ -209,12 +209,14 @@ public class Main {
             }
 
             // Connect the processes using pipes
+            List<Thread> pipeThreads = new ArrayList<>();
+            
             for (int i = 0; i < processes.size() - 1; i++) {
                 Process currentProcess = processes.get(i);
                 Process nextProcess = processes.get(i + 1);
 
                 // Create a thread to copy output from current process to input of next process
-                new Thread(() -> {
+                Thread pipeThread = new Thread(() -> {
                     try {
                         InputStream input = currentProcess.getInputStream();
                         OutputStream output = nextProcess.getOutputStream();
@@ -228,12 +230,14 @@ public class Main {
                     } catch (IOException e) {
                         // Pipe closed, process ended
                     }
-                }).start();
+                });
+                pipeThread.start();
+                pipeThreads.add(pipeThread);
             }
 
             // For the last process, copy its output to our stdout
             Process lastProcess = processes.get(processes.size() - 1);
-            new Thread(() -> {
+            Thread lastOutputThread = new Thread(() -> {
                 try {
                     InputStream input = lastProcess.getInputStream();
                     OutputStream output = System.out;
@@ -246,12 +250,21 @@ public class Main {
                 } catch (IOException e) {
                     // Stream closed
                 }
-            }).start();
+            });
+            lastOutputThread.start();
 
             // Wait for all processes to complete
             for (Process process : processes) {
                 process.waitFor();
             }
+
+            // Wait for all pipe threads to complete
+            for (Thread thread : pipeThreads) {
+                thread.join();
+            }
+
+            // Wait for the last output thread to complete
+            lastOutputThread.join();
 
         } catch (Exception e) {
             System.err.println("Error executing pipeline: " + e.getMessage());
