@@ -128,7 +128,7 @@ public class Main {
         sc.close();
     }
 
-    // ================= FULL QUOTE PARSER =================
+    // ================= FULL PARSER (BACKSLASH + QUOTES) =================
     static List<String> parse(String input) {
         List<String> result = new ArrayList<>();
         StringBuilder current = new StringBuilder();
@@ -139,19 +139,28 @@ public class Main {
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
 
-            // TOGGLE SINGLE QUOTE
+            // ================= SINGLE QUOTE =================
             if (c == '\'' && !inDouble) {
                 inSingle = !inSingle;
                 continue;
             }
 
-            // TOGGLE DOUBLE QUOTE
+            // ================= DOUBLE QUOTE =================
             if (c == '"' && !inSingle) {
                 inDouble = !inDouble;
                 continue;
             }
 
-            // SPLIT ONLY OUTSIDE QUOTES
+            // ================= BACKSLASH (ONLY OUTSIDE QUOTES) =================
+            if (c == '\\' && !inSingle && !inDouble) {
+                if (i + 1 < input.length()) {
+                    i++;
+                    current.append(input.charAt(i));
+                }
+                continue;
+            }
+
+            // ================= SPLIT OUTSIDE QUOTES =================
             if (!inSingle && !inDouble && Character.isWhitespace(c)) {
                 if (current.length() > 0) {
                     result.add(current.toString());
