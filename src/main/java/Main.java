@@ -49,7 +49,8 @@ public class Main {
 
     // =========================================================
     // Tokenizer — handles single quotes, double quotes, backslash
-    // escapes, and splits out the redirection operators > / 1> / 2>
+    // escapes, and splits out redirection operators:
+    // > / 1> / 2>  and  >> / 1>> / 2>>
     // =========================================================
     private static List<String> tokenize(String line) {
         List<String> tokens = new ArrayList<>();
@@ -116,22 +117,24 @@ public class Main {
                     i++;
                 }
                 case '>' -> {
-                    // Distinguish "1>"/"2>" (no space before '>') from a
-                    // literal argument "1"/"2" followed by a separate ">".
+                    // Determine an optional fd prefix ("1" or "2") that was
+                    // just accumulated with no space before this '>', then
+                    // check if a second '>' immediately follows for append mode.
                     String currentStr = current.toString();
+                    String fdPrefix = "";
                     if (hasToken && (currentStr.equals("1") || currentStr.equals("2"))) {
+                        fdPrefix = currentStr;
                         current.setLength(0);
                         hasToken = false;
-                        tokens.add(currentStr + ">");
-                    } else {
-                        if (hasToken) {
-                            tokens.add(current.toString());
-                            current.setLength(0);
-                            hasToken = false;
-                        }
-                        tokens.add(">");
+                    } else if (hasToken) {
+                        tokens.add(current.toString());
+                        current.setLength(0);
+                        hasToken = false;
                     }
-                    i++;
+
+                    boolean append = (i + 1 < n && line.charAt(i + 1) == '>');
+                    tokens.add(fdPrefix + (append ? ">>" : ">"));
+                    i += append ? 2 : 1;
                 }
                 default -> {
                     current.append(c);
@@ -162,11 +165,16 @@ public class Main {
         List<String> args;
         String stdoutFile;
         String stderrFile;
+        boolean appendStdout;
+        boolean appendStderr;
 
-        ParsedCommand(List<String> args, String stdoutFile, String stderrFile) {
+        ParsedCommand(List<String> args, String stdoutFile, String stderrFile,
+                      boolean appendStdout, boolean appendStderr) {
             this.args = args;
             this.stdoutFile = stdoutFile;
             this.stderrFile = stderrFile;
+            this.appendStdout = appendStdout;
+            this.appendStderr = appendStderr;
         }
     }
 
@@ -174,27 +182,31 @@ public class Main {
         List<String> args = new ArrayList<>();
         String stdoutFile = null;
         String stderrFile = null;
+        boolean appendStdout = false;
+        boolean appendStderr = false;
 
         for (int i = 0; i < tokens.size(); i++) {
             String token = tokens.get(i);
-            if (token.equals(">") || token.equals("1>")) {
+            if (token.equals(">") || token.equals("1>") || token.equals(">>") || token.equals("1>>")) {
                 if (i + 1 >= tokens.size()) {
                     throw new IllegalArgumentException("syntax error near unexpected token `newline'");
                 }
                 stdoutFile = tokens.get(i + 1);
+                appendStdout = token.equals(">>") || token.equals("1>>");
                 i++; // consume the filename token too
-            } else if (token.equals("2>")) {
+            } else if (token.equals("2>") || token.equals("2>>")) {
                 if (i + 1 >= tokens.size()) {
                     throw new IllegalArgumentException("syntax error near unexpected token `newline'");
                 }
                 stderrFile = tokens.get(i + 1);
+                appendStderr = token.equals("2>>");
                 i++;
             } else {
                 args.add(token);
             }
         }
 
-        return new ParsedCommand(args, stdoutFile, stderrFile);
+        return new ParsedCommand(args, stdoutFile, stderrFile, appendStdout, appendStderr);
     }
 
     // =========================================================
@@ -217,11 +229,11 @@ public class Main {
 
         try {
             if (cmd.stdoutFile != null) {
-                outFos = new FileOutputStream(resolvePath(cmd.stdoutFile)); // create/truncate, like '>'
+                outFos = new FileOutputStream(resolvePath(cmd.stdoutFile), cmd.appendStdout); // create; truncate or append
                 out = new PrintStream(outFos);
             }
             if (cmd.stderrFile != null) {
-                errFos = new FileOutputStream(resolvePath(cmd.stderrFile)); // create/truncate, like '2>'
+                errFos = new FileOutputStream(resolvePath(cmd.stderrFile), cmd.appendStderr); // create; truncate or append
                 err = new PrintStream(errFos);
             }
 
@@ -309,7 +321,7 @@ public class Main {
             FileOutputStream errFos = null;
             try {
                 if (cmd.stderrFile != null) {
-                    errFos = new FileOutputStream(resolvePath(cmd.stderrFile));
+                    errFos = new FileOutputStream(resolvePath(cmd.stderrFile), cmd.appendStderr);
                     err = new PrintStream(errFos);
                 }
                 err.println(cmd.args.get(0) + ": command not found");
@@ -324,13 +336,15 @@ public class Main {
         pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
 
         if (cmd.stdoutFile != null) {
-            pb.redirectOutput(resolvePath(cmd.stdoutFile)); // create/truncate, like '>'
+            File f = resolvePath(cmd.stdoutFile);
+            pb.redirectOutput(cmd.appendStdout ? ProcessBuilder.Redirect.appendTo(f) : ProcessBuilder.Redirect.to(f));
         } else {
             pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
         }
 
         if (cmd.stderrFile != null) {
-            pb.redirectError(resolvePath(cmd.stderrFile)); // create/truncate, like '2>'
+            File f = resolvePath(cmd.stderrFile);
+            pb.redirectError(cmd.appendStderr ? ProcessBuilder.Redirect.appendTo(f) : ProcessBuilder.Redirect.to(f));
         } else {
             pb.redirectError(ProcessBuilder.Redirect.INHERIT);
         }
