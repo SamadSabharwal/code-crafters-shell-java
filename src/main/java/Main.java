@@ -128,21 +128,31 @@ public class Main {
         sc.close();
     }
 
-    // ================= SINGLE QUOTE PARSER =================
+    // ================= FULL QUOTE PARSER =================
     static List<String> parse(String input) {
         List<String> result = new ArrayList<>();
         StringBuilder current = new StringBuilder();
-        boolean inQuote = false;
+
+        boolean inSingle = false;
+        boolean inDouble = false;
 
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
 
-            if (c == '\'') {
-                inQuote = !inQuote;
+            // TOGGLE SINGLE QUOTE
+            if (c == '\'' && !inDouble) {
+                inSingle = !inSingle;
                 continue;
             }
 
-            if (!inQuote && Character.isWhitespace(c)) {
+            // TOGGLE DOUBLE QUOTE
+            if (c == '"' && !inSingle) {
+                inDouble = !inDouble;
+                continue;
+            }
+
+            // SPLIT ONLY OUTSIDE QUOTES
+            if (!inSingle && !inDouble && Character.isWhitespace(c)) {
                 if (current.length() > 0) {
                     result.add(current.toString());
                     current.setLength(0);
@@ -161,6 +171,7 @@ public class Main {
 
     // ================= PATH RESOLVER =================
     static String resolvePath(String base, String target) {
+
         String[] baseParts = base.split("/");
         List<String> stack = new ArrayList<>();
 
