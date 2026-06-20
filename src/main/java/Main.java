@@ -60,7 +60,7 @@ public class Main {
                 continue;
             }
 
-            // ================= EXECUTION =================
+            // ================= EXECUTE EXTERNAL PROGRAM =================
             String execPath = findExecutable(command);
 
             if (execPath == null) {
@@ -69,17 +69,19 @@ public class Main {
             }
 
             try {
-                // IMPORTANT:
-                // DO NOT try to control argv[0] in Java (impossible here)
-                // Just run executable normally
                 List<String> cmd = new ArrayList<>();
+
+                // executable
                 cmd.add(execPath);
 
+                // arguments (IMPORTANT: pass exactly as input)
                 for (int i = 1; i < parts.length; i++) {
                     cmd.add(parts[i]);
                 }
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
+
+                // inherit IO so program output appears directly
                 pb.inheritIO();
 
                 Process process = pb.start();
@@ -93,6 +95,7 @@ public class Main {
         sc.close();
     }
 
+    // ================= PATH RESOLUTION =================
     static String findExecutable(String target) {
         String pathEnv = System.getenv("PATH");
         if (pathEnv == null) return null;
