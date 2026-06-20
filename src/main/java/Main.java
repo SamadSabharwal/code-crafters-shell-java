@@ -26,12 +26,12 @@ public class Main {
             String[] parts = input.split("\\s+");
             String command = parts[0];
 
-            // ===== exit builtin =====
+            // ================= EXIT =================
             if (command.equals("exit")) {
                 System.exit(0);
             }
 
-            // ===== echo builtin =====
+            // ================= ECHO =================
             if (command.equals("echo")) {
                 for (int i = 1; i < parts.length; i++) {
                     System.out.print(parts[i]);
@@ -41,7 +41,7 @@ public class Main {
                 continue;
             }
 
-            // ===== type builtin =====
+            // ================= TYPE =================
             if (command.equals("type")) {
                 if (parts.length < 2) continue;
 
@@ -49,18 +49,19 @@ public class Main {
 
                 if (builtins.contains(target)) {
                     System.out.println(target + " is a shell builtin");
+                    continue;
+                }
+
+                String path = findExecutable(target);
+                if (path != null) {
+                    System.out.println(target + " is " + path);
                 } else {
-                    String path = findExecutable(target);
-                    if (path != null) {
-                        System.out.println(target + " is " + path);
-                    } else {
-                        System.out.println(target + ": not found");
-                    }
+                    System.out.println(target + ": not found");
                 }
                 continue;
             }
 
-            // ===== external command execution =====
+            // ================= EXECUTION =================
             String execPath = findExecutable(command);
 
             if (execPath == null) {
@@ -70,15 +71,20 @@ public class Main {
 
             try {
                 List<String> cmdList = new ArrayList<>();
-                cmdList.add(execPath);
 
-                // add arguments
+                // IMPORTANT FIX: argv[0] must be command name
+                cmdList.add(command);
+
                 for (int i = 1; i < parts.length; i++) {
                     cmdList.add(parts[i]);
                 }
 
                 ProcessBuilder pb = new ProcessBuilder(cmdList);
-                pb.inheritIO(); // prints output directly
+
+                // map command name → actual executable path
+                pb.command().set(0, execPath);
+
+                pb.inheritIO();
 
                 Process process = pb.start();
                 process.waitFor();
@@ -91,7 +97,7 @@ public class Main {
         sc.close();
     }
 
-    // ===== PATH search logic (reused from type stage) =====
+    // ================= PATH SEARCH =================
     static String findExecutable(String target) {
         String pathEnv = System.getenv("PATH");
         if (pathEnv == null) return null;
