@@ -1,17 +1,24 @@
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class Main {
     private static Map<Integer, BackgroundJob> backgroundJobs = new LinkedHashMap<>();
     private static int jobCounter = 1;
+    private static final Set<String> BUILTINS = new HashSet<>(Arrays.asList(
+        "echo", "type", "exit", "pwd", "cd", "jobs"
+    ));
 
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
@@ -45,11 +52,114 @@ public class Main {
             if (line.contains("|")) {
                 executePipeline(line, isBackground);
             } else {
-                executeCommand(parseCommand(line), isBackground);
+                List<String> command = parseCommand(line);
+                
+                // Handle builtins
+                if (!command.isEmpty() && isBuiltin(command.get(0))) {
+                    handleBuiltin(command);
+                } else {
+                    executeCommand(command, isBackground);
+                }
             }
 
             // Check for completed background jobs
             printCompletedJobs();
+        }
+    }
+
+    private static boolean isBuiltin(String command) {
+        return BUILTINS.contains(command);
+    }
+
+    private static void handleBuiltin(List<String> command) {
+        String cmd = command.get(0);
+
+        switch (cmd) {
+            case "echo":
+                handleEcho(command);
+                break;
+            case "type":
+                handleType(command);
+                break;
+            case "pwd":
+                handlePwd();
+                break;
+            case "cd":
+                handleCd(command);
+                break;
+            case "jobs":
+                handleJobs();
+                break;
+            case "exit":
+                System.exit(0);
+                break;
+        }
+    }
+
+    private static void handleEcho(List<String> command) {
+        // Skip the "echo" command itself
+        List<String> args = command.subList(1, command.size());
+        System.out.println(String.join(" ", args));
+    }
+
+    private static void handleType(List<String> command) {
+        if (command.size() < 2) {
+            System.err.println("type: missing argument");
+            return;
+        }
+
+        String cmdName = command.get(1);
+
+        if (BUILTINS.contains(cmdName)) {
+            System.out.println(cmdName + " is a shell builtin");
+        } else {
+            // Check if it's an external command in PATH
+            String pathEnv = System.getenv("PATH");
+            if (pathEnv != null) {
+                String[] paths = pathEnv.split(":");
+                for (String path : paths) {
+                    File file = new File(path, cmdName);
+                    if (file.exists() && file.isFile() && file.canExecute()) {
+                        System.out.println(cmdName + " is " + file.getAbsolutePath());
+                        return;
+                    }
+                }
+            }
+            System.out.println(cmdName + ": not found");
+        }
+    }
+
+    private static void handlePwd() {
+        System.out.println(System.getProperty("user.dir"));
+    }
+
+    private static void handleCd(List<String> command) {
+        String targetDir;
+        if (command.size() < 2) {
+            targetDir = System.getProperty("user.home");
+        } else {
+            targetDir = command.get(1);
+        }
+
+        File dir = new File(targetDir);
+        if (!dir.exists() || !dir.isDirectory()) {
+            System.err.println("cd: " + targetDir + ": No such file or directory");
+            return;
+        }
+
+        try {
+            System.setProperty("user.dir", dir.getCanonicalPath());
+        } catch (IOException e) {
+            System.err.println("cd: " + targetDir + ": " + e.getMessage());
+        }
+    }
+
+    private static void handleJobs() {
+        // Print all running background jobs
+        for (BackgroundJob job : backgroundJobs.values()) {
+            if ("Running".equals(job.status)) {
+                System.out.println("[" + job.jobNumber + "]   " + job.status + "   " + job.command);
+            }
         }
     }
 
