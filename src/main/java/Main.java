@@ -1,7 +1,10 @@
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -23,6 +26,14 @@ public class Main {
         }
     }
 
+    static class Redirection {
+        String stdinFile;
+        String stdoutFile;
+        boolean stdoutAppend;
+        String stderrFile;
+        boolean stderrAppend;
+    }
+
     private static final List<Job> jobs = new ArrayList<>();
     private static int jobCounter = 0;
 
@@ -36,43 +47,69 @@ public class Main {
             System.out.flush();
 
             String line = reader.readLine();
-            if (line == null) {
-                break; // EOF
-            }
-            if (line.trim().isEmpty()) {
-                continue;
-            }
+            if (line == null) break; // EOF
+            if (line.trim().isEmpty()) continue;
 
-            List<String> tokens = tokenize(line);
-            if (tokens.isEmpty()) {
-                continue;
-            }
+            List<String> rawTokens = tokenize(line);
+            if (rawTokens.isEmpty()) continue;
 
             boolean background = false;
-            if (tokens.get(tokens.size() - 1).equals("&")) {
+            if (rawTokens.get(rawTokens.size() - 1).equals("&")) {
                 background = true;
-                tokens.remove(tokens.size() - 1);
+                rawTokens.remove(rawTokens.size() - 1);
             }
+            if (rawTokens.isEmpty()) continue;
 
-            if (tokens.isEmpty()) {
-                continue;
-            }
+            // Display string for `jobs` (includes redirection tokens as typed)
+            String commandStr = String.join(" ", rawTokens);
+            if (background) commandStr = commandStr + " &";
 
-            // Reconstruct the command string as typed (minus the trailing "&"),
-            // used for the `jobs` listing.
-            String commandStr = String.join(" ", tokens);
-            if (background) {
-                commandStr = commandStr + " &";
-            }
+            Redirection redir = new Redirection();
+            List<String> tokens = extractRedirection(rawTokens, redir);
+            if (tokens.isEmpty()) continue;
 
-            executeCommand(tokens, background, commandStr);
+            executeCommand(tokens, background, commandStr, redir);
         }
     }
 
-    private static void executeCommand(List<String> tokens, boolean background, String commandStr) {
+    // Recognizes: <  >  1>  >>  1>>  2>  2>>
+    private static List<String> extractRedirection(List<String> rawTokens, Redirection redir) {
+        List<String> result = new ArrayList<>();
+        for (int i = 0; i < rawTokens.size(); i++) {
+            String tok = rawTokens.get(i);
+            if (tok.equals("<")) {
+                if (i + 1 < rawTokens.size()) redir.stdinFile = rawTokens.get(++i);
+            } else if (tok.equals(">") || tok.equals("1>")) {
+                if (i + 1 < rawTokens.size()) {
+                    redir.stdoutFile = rawTokens.get(++i);
+                    redir.stdoutAppend = false;
+                }
+            } else if (tok.equals(">>") || tok.equals("1>>")) {
+                if (i + 1 < rawTokens.size()) {
+                    redir.stdoutFile = rawTokens.get(++i);
+                    redir.stdoutAppend = true;
+                }
+            } else if (tok.equals("2>")) {
+                if (i + 1 < rawTokens.size()) {
+                    redir.stderrFile = rawTokens.get(++i);
+                    redir.stderrAppend = false;
+                }
+            } else if (tok.equals("2>>")) {
+                if (i + 1 < rawTokens.size()) {
+                    redir.stderrFile = rawTokens.get(++i);
+                    redir.stderrAppend = true;
+                }
+            } else {
+                result.add(tok);
+            }
+        }
+        return result;
+    }
+
+    private static void executeCommand(List<String> tokens, boolean background,
+                                        String commandStr, Redirection redir) {
         String cmd = tokens.get(0);
 
-        // Built-ins always run in the foreground (in-process)
         switch (cmd) {
             case "exit":
                 System.exit(tokens.size() > 1 ? Integer.parseInt(tokens.get(1)) : 0);
@@ -81,16 +118,17 @@ public class Main {
                 builtinCd(tokens);
                 return;
             case "pwd":
-                System.out.println(System.getProperty("user.dir"));
+                runBuiltinWithRedirection(redir, () -> System.out.println(System.getProperty("user.dir")));
                 return;
             case "echo":
-                System.out.println(String.join(" ", tokens.subList(1, tokens.size())));
+                runBuiltinWithRedirection(redir, () ->
+                        System.out.println(String.join(" ", tokens.subList(1, tokens.size()))));
                 return;
             case "type":
-                builtinType(tokens);
+                runBuiltinWithRedirection(redir, () -> builtinType(tokens));
                 return;
             case "jobs":
-                builtinJobs();
+                runBuiltinWithRedirection(redir, Main::builtinJobs);
                 return;
         }
 
@@ -98,11 +136,29 @@ public class Main {
             ProcessBuilder pb = new ProcessBuilder(tokens);
             pb.directory(new File(System.getProperty("user.dir")));
 
-            // Inherit the shell's stdio streams so background jobs can still
-            // print to the terminal.
-            pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
-            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-            pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+            if (redir.stdinFile != null) {
+                pb.redirectInput(new File(redir.stdinFile));
+            } else {
+                pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+            }
+
+            if (redir.stdoutFile != null) {
+                File f = new File(redir.stdoutFile);
+                pb.redirectOutput(redir.stdoutAppend
+                        ? ProcessBuilder.Redirect.appendTo(f)
+                        : ProcessBuilder.Redirect.to(f));
+            } else {
+                pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+            }
+
+            if (redir.stderrFile != null) {
+                File f = new File(redir.stderrFile);
+                pb.redirectError(redir.stderrAppend
+                        ? ProcessBuilder.Redirect.appendTo(f)
+                        : ProcessBuilder.Redirect.to(f));
+            } else {
+                pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+            }
 
             Process process = pb.start();
 
@@ -120,14 +176,40 @@ public class Main {
         }
     }
 
+    private static void runBuiltinWithRedirection(Redirection redir, Runnable body) {
+        PrintStream originalOut = System.out;
+        PrintStream originalErr = System.err;
+        PrintStream outStream = null;
+        PrintStream errStream = null;
+
+        try {
+            if (redir.stdoutFile != null) {
+                outStream = new PrintStream(new FileOutputStream(redir.stdoutFile, redir.stdoutAppend));
+                System.setOut(outStream);
+            }
+            if (redir.stderrFile != null) {
+                errStream = new PrintStream(new FileOutputStream(redir.stderrFile, redir.stderrAppend));
+                System.setErr(errStream);
+            }
+            body.run();
+        } catch (FileNotFoundException e) {
+            originalOut.println("bash: " +
+                    (redir.stdoutFile != null ? redir.stdoutFile : redir.stderrFile) +
+                    ": No such file or directory");
+        } finally {
+            System.setOut(originalOut);
+            System.setErr(originalErr);
+            if (outStream != null) outStream.close();
+            if (errStream != null) errStream.close();
+        }
+    }
+
     private static void reapFinishedBackgroundJobs() {
         for (Job job : jobs) {
             if (job.process != null && !job.process.isAlive()) {
                 job.status = "Done";
             }
         }
-        // Jobs are kept in the list (with updated status) rather than removed
-        // immediately, since later stages may need to report "Done" jobs too.
     }
 
     private static void builtinJobs() {
@@ -142,17 +224,13 @@ public class Main {
 
     private static void builtinCd(List<String> tokens) {
         String target = tokens.size() > 1 ? tokens.get(1) : System.getProperty("user.home");
-        if (target.equals("~")) {
-            target = System.getProperty("user.home");
-        }
+        if (target.equals("~")) target = System.getProperty("user.home");
         File dir = new File(target);
-        if (!dir.isAbsolute()) {
-            dir = new File(System.getProperty("user.dir"), target);
-        }
+        if (!dir.isAbsolute()) dir = new File(System.getProperty("user.dir"), target);
         try {
             dir = dir.getCanonicalFile();
         } catch (IOException e) {
-            // ignore, fall through to existence check
+            // ignore
         }
         if (dir.exists() && dir.isDirectory()) {
             System.setProperty("user.dir", dir.getAbsolutePath());
@@ -182,7 +260,8 @@ public class Main {
         System.out.println(name + ": not found");
     }
 
-    // Minimal tokenizer supporting single quotes, double quotes, and backslash escapes
+    // Tokenizer supporting single quotes, double quotes, backslash escapes,
+    // and redirection operators: < > 1> >> 1>> 2> 2>>
     private static List<String> tokenize(String line) {
         List<String> tokens = new ArrayList<>();
         StringBuilder current = new StringBuilder();
@@ -193,12 +272,11 @@ public class Main {
             char c = line.charAt(i);
 
             if (inSingle) {
-                if (c == '\'') {
-                    inSingle = false;
-                } else {
-                    current.append(c);
-                }
-            } else if (inDouble) {
+                if (c == '\'') inSingle = false;
+                else current.append(c);
+                continue;
+            }
+            if (inDouble) {
                 if (c == '"') {
                     inDouble = false;
                 } else if (c == '\\' && i + 1 < line.length() &&
@@ -208,39 +286,62 @@ public class Main {
                 } else {
                     current.append(c);
                 }
-            } else {
-                if (c == '\'') {
-                    inSingle = true;
-                    tokenStarted = true;
-                } else if (c == '"') {
-                    inDouble = true;
-                    tokenStarted = true;
-                } else if (c == '\\' && i + 1 < line.length()) {
-                    current.append(line.charAt(i + 1));
-                    i++;
-                    tokenStarted = true;
-                } else if (Character.isWhitespace(c)) {
-                    if (tokenStarted) {
-                        tokens.add(current.toString());
-                        current.setLength(0);
-                        tokenStarted = false;
-                    }
-                } else if (c == '&') {
-                    if (tokenStarted) {
-                        tokens.add(current.toString());
-                        current.setLength(0);
-                        tokenStarted = false;
-                    }
-                    tokens.add("&");
-                } else {
-                    current.append(c);
-                    tokenStarted = true;
+                continue;
+            }
+
+            if (c == '\'') {
+                inSingle = true;
+                tokenStarted = true;
+            } else if (c == '"') {
+                inDouble = true;
+                tokenStarted = true;
+            } else if (c == '\\' && i + 1 < line.length()) {
+                current.append(line.charAt(i + 1));
+                i++;
+                tokenStarted = true;
+            } else if (Character.isWhitespace(c)) {
+                if (tokenStarted) {
+                    tokens.add(current.toString());
+                    current.setLength(0);
+                    tokenStarted = false;
                 }
+            } else if (c == '&') {
+                if (tokenStarted) {
+                    tokens.add(current.toString());
+                    current.setLength(0);
+                    tokenStarted = false;
+                }
+                tokens.add("&");
+            } else if (c == '<') {
+                if (tokenStarted) {
+                    tokens.add(current.toString());
+                    current.setLength(0);
+                    tokenStarted = false;
+                }
+                tokens.add("<");
+            } else if (c == '>') {
+                String fdPrefix = "";
+                if (tokenStarted && current.toString().matches("[12]")) {
+                    fdPrefix = current.toString();
+                    current.setLength(0);
+                    tokenStarted = false;
+                } else if (tokenStarted) {
+                    tokens.add(current.toString());
+                    current.setLength(0);
+                    tokenStarted = false;
+                }
+                if (i + 1 < line.length() && line.charAt(i + 1) == '>') {
+                    tokens.add(fdPrefix + ">>");
+                    i++;
+                } else {
+                    tokens.add(fdPrefix + ">");
+                }
+            } else {
+                current.append(c);
+                tokenStarted = true;
             }
         }
-        if (tokenStarted) {
-            tokens.add(current.toString());
-        }
+        if (tokenStarted) tokens.add(current.toString());
         return tokens;
     }
 }
