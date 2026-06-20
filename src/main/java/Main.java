@@ -472,7 +472,7 @@ public class Main {
                 continue;
             }
 
-            if (c.equals("jobs")) {
+            if (.equals("jobs")) {
                 if (r.errFile != null) touchFile(r.errFile, r.appendErr);
                 if (r.outFile != null) touchFile(r.outFile, r.appendOut);
 
