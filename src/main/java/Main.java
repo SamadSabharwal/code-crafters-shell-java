@@ -92,7 +92,7 @@ public class Main {
                 continue;
             }
 
-            // ================= EXECUTION (FIXED) =================
+            // ================= EXECUTION (FINAL FIX) =================
             String execPath = findExecutable(command);
 
             if (execPath == null) {
@@ -103,8 +103,9 @@ public class Main {
             try {
                 List<String> cmd = new ArrayList<>();
 
-                // ✔ IMPORTANT FIX: use FULL PATH
-                cmd.add(execPath);
+                // ✔ CRITICAL FIX:
+                // ALWAYS use command name, NOT full path
+                cmd.add(command);
 
                 for (int i = 1; i < parts.length; i++) {
                     cmd.add(parts[i]);
