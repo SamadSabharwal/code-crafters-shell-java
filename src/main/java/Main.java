@@ -72,6 +72,22 @@ public class Main {
     }
 
     private static void executeSingle(String input, boolean isBackground) {
+        // 1. Intercept the 'jobs' built-in command
+        if (input.equals("jobs")) {
+            List<Integer> jobIds = new ArrayList<>(activeJobs.keySet());
+            Collections.sort(jobIds);
+            
+            for (int id : jobIds) {
+                Job job = activeJobs.get(id);
+                if (job.process.isAlive()) {
+                    // Standard formatting for running background jobs
+                    System.out.println("[" + id + "]+  Running                 " + job.command + " &");
+                }
+            }
+            return; // Return immediately to prevent ProcessBuilder from running
+        }
+
+        // 2. Existing external command logic
         try {
             String[] cmdArgs = input.split(" +");
             ProcessBuilder pb = new ProcessBuilder(cmdArgs);
