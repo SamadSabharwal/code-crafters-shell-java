@@ -1,3 +1,4 @@
+import java.io.File;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Scanner;
@@ -5,7 +6,7 @@ import java.util.Set;
 
 public class Main {
 
-    // list of builtins
+    // builtin commands
     static Set<String> builtins = new HashSet<>(
             Arrays.asList("echo", "exit", "type")
     );
@@ -21,37 +22,57 @@ public class Main {
             }
 
             String input = sc.nextLine().trim();
-
-            if (input.isEmpty()) {
-                continue;
-            }
+            if (input.isEmpty()) continue;
 
             String[] parts = input.split("\\s+");
             String command = parts[0];
 
-            // ===== BUILTIN: exit =====
+            // ===== exit builtin =====
             if (command.equals("exit")) {
                 System.exit(0);
             }
 
-            // ===== BUILTIN: type =====
+            // ===== type builtin =====
             if (command.equals("type")) {
-                if (parts.length < 2) {
-                    // no argument provided
-                    continue;
-                }
+                if (parts.length < 2) continue;
 
                 String target = parts[1];
 
+                // 1. check builtin
                 if (builtins.contains(target)) {
                     System.out.println(target + " is a shell builtin");
-                } else {
+                    continue;
+                }
+
+                // 2. check PATH
+                String pathEnv = System.getenv("PATH");
+                if (pathEnv == null) {
+                    System.out.println(target + ": not found");
+                    continue;
+                }
+
+                String[] paths = pathEnv.split(":");
+
+                boolean found = false;
+
+                for (String dir : paths) {
+                    File file = new File(dir, target);
+
+                    if (file.exists() && file.isFile() && file.canExecute()) {
+                        System.out.println(target + " is " + file.getAbsolutePath());
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found) {
                     System.out.println(target + ": not found");
                 }
+
                 continue;
             }
 
-            // ===== BUILTIN: echo =====
+            // ===== echo builtin =====
             if (command.equals("echo")) {
                 for (int i = 1; i < parts.length; i++) {
                     System.out.print(parts[i]);
