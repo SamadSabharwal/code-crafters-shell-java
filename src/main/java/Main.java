@@ -9,7 +9,7 @@ import java.util.Set;
 public class Main {
 
     static Set<String> builtins = new HashSet<>(
-            Arrays.asList("echo", "exit", "type")
+            Arrays.asList("echo", "exit", "type", "pwd")
     );
 
     public static void main(String[] args) throws Exception {
@@ -49,16 +49,20 @@ public class Main {
 
                 if (builtins.contains(target)) {
                     System.out.println(target + " is a shell builtin");
-                    continue;
-                }
-
-                String path = findExecutable(target);
-                if (path != null) {
-                    System.out.println(target + " is " + path);
                 } else {
-                    System.out.println(target + ": not found");
+                    String path = findExecutable(target);
+                    if (path != null) {
+                        System.out.println(target + " is " + path);
+                    } else {
+                        System.out.println(target + ": not found");
+                    }
                 }
+                continue;
+            }
 
+            // ================= PWD =================
+            if (command.equals("pwd")) {
+                System.out.println(System.getProperty("user.dir"));
                 continue;
             }
 
@@ -73,11 +77,6 @@ public class Main {
             try {
                 List<String> cmd = new ArrayList<>();
 
-                /*
-                 ❗ CRITICAL FIX:
-                 Use COMMAND NAME instead of full path
-                 This ensures argv[0] matches expected output behavior
-                */
                 cmd.add(command);
 
                 for (int i = 1; i < parts.length; i++) {
@@ -85,12 +84,7 @@ public class Main {
                 }
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
-
-                /*
-                 Ensure PATH resolution still works
-                */
                 pb.environment().put("PATH", System.getenv("PATH"));
-
                 pb.inheritIO();
 
                 Process process = pb.start();
