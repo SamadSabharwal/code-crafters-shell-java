@@ -12,6 +12,8 @@ public class Main {
             Arrays.asList("echo", "exit", "type", "pwd", "cd")
     );
 
+    static String currentDir = System.getProperty("user.dir");
+
     public static void main(String[] args) throws Exception {
         Scanner sc = new Scanner(System.in);
 
@@ -63,11 +65,28 @@ public class Main {
 
             // ================= PWD =================
             if (command.equals("pwd")) {
-                System.out.println(System.getProperty("user.dir"));
+                System.out.println(currentDir);
                 continue;
             }
 
-            // ================= EXECUTION (IMPORTANT FIX) =================
+            // ================= CD (FIXED) =================
+            if (command.equals("cd")) {
+                if (parts.length < 2) {
+                    continue;
+                }
+
+                String target = parts[1];
+                File dir = new File(target);
+
+                if (dir.exists() && dir.isDirectory()) {
+                    currentDir = dir.getAbsolutePath();
+                } else {
+                    System.out.println("cd: " + target + ": No such file or directory");
+                }
+                continue;
+            }
+
+            // ================= EXECUTION =================
             String execPath = findExecutable(command);
 
             if (execPath == null) {
@@ -77,12 +96,6 @@ public class Main {
 
             try {
                 List<String> cmd = new ArrayList<>();
-
-                /*
-                 ✔ CRITICAL FIX:
-                 DO NOT use execPath as argv[0]
-                 Use command name only
-                */
                 cmd.add(command);
 
                 for (int i = 1; i < parts.length; i++) {
@@ -90,7 +103,6 @@ public class Main {
                 }
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
-
                 pb.inheritIO();
 
                 Process process = pb.start();
@@ -104,7 +116,6 @@ public class Main {
         sc.close();
     }
 
-    // ================= PATH SEARCH =================
     static String findExecutable(String target) {
         String pathEnv = System.getenv("PATH");
         if (pathEnv == null) return null;
