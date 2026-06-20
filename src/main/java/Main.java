@@ -53,11 +53,13 @@ public class Main {
                 }
 
                 String path = findExecutable(target);
+
                 if (path != null) {
                     System.out.println(target + " is " + path);
                 } else {
                     System.out.println(target + ": not found");
                 }
+
                 continue;
             }
 
@@ -70,18 +72,19 @@ public class Main {
             }
 
             try {
-                List<String> cmdList = new ArrayList<>();
+                List<String> cmd = new ArrayList<>();
 
-                // IMPORTANT FIX: argv[0] must be command name
-                cmdList.add(command);
+                // ❗ IMPORTANT FIX:
+                // argv[0] MUST be command name, not full path
+                cmd.add(command);
 
                 for (int i = 1; i < parts.length; i++) {
-                    cmdList.add(parts[i]);
+                    cmd.add(parts[i]);
                 }
 
-                ProcessBuilder pb = new ProcessBuilder(cmdList);
+                ProcessBuilder pb = new ProcessBuilder(cmd);
 
-                // map command name → actual executable path
+                // Replace ONLY execution target (NOT argv[0] seen by program)
                 pb.command().set(0, execPath);
 
                 pb.inheritIO();
@@ -102,9 +105,9 @@ public class Main {
         String pathEnv = System.getenv("PATH");
         if (pathEnv == null) return null;
 
-        String[] paths = pathEnv.split(":");
+        String[] dirs = pathEnv.split(":");
 
-        for (String dir : paths) {
+        for (String dir : dirs) {
             File file = new File(dir, target);
 
             if (file.exists() && file.isFile() && file.canExecute()) {
