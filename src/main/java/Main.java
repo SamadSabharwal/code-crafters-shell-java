@@ -9,8 +9,11 @@ import java.util.Set;
 public class Main {
 
     static Set<String> builtins = new HashSet<>(
-            Arrays.asList("echo", "exit", "type", "pwd")
+            Arrays.asList("echo", "exit", "type", "pwd", "cd")
     );
+
+    // ✔ track current working directory manually
+    static String currentDir = System.getProperty("user.dir");
 
     public static void main(String[] args) throws Exception {
         Scanner sc = new Scanner(System.in);
@@ -62,7 +65,23 @@ public class Main {
 
             // ================= PWD =================
             if (command.equals("pwd")) {
-                System.out.println(System.getProperty("user.dir"));
+                System.out.println(currentDir);
+                continue;
+            }
+
+            // ================= CD (ABSOLUTE PATH ONLY) =================
+            if (command.equals("cd")) {
+                if (parts.length < 2) continue;
+
+                String targetDir = parts[1];
+
+                File dir = new File(targetDir);
+
+                if (dir.exists() && dir.isDirectory()) {
+                    currentDir = dir.getAbsolutePath();
+                } else {
+                    System.out.println("cd: " + targetDir + ": No such file or directory");
+                }
                 continue;
             }
 
@@ -84,6 +103,7 @@ public class Main {
                 }
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
+
                 pb.environment().put("PATH", System.getenv("PATH"));
                 pb.inheritIO();
 
