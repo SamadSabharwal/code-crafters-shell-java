@@ -22,11 +22,12 @@ public class Main {
 
             if (!sc.hasNextLine()) break;
 
-            String input = sc.nextLine().trim();
-            if (input.isEmpty()) continue;
+            String input = sc.nextLine();
 
-            String[] parts = input.split("\\s+");
-            String command = parts[0];
+            List<String> parts = parse(input);
+            if (parts.isEmpty()) continue;
+
+            String command = parts.get(0);
 
             // ================= EXIT =================
             if (command.equals("exit")) {
@@ -35,9 +36,9 @@ public class Main {
 
             // ================= ECHO =================
             if (command.equals("echo")) {
-                for (int i = 1; i < parts.length; i++) {
-                    System.out.print(parts[i]);
-                    if (i != parts.length - 1) System.out.print(" ");
+                for (int i = 1; i < parts.size(); i++) {
+                    System.out.print(parts.get(i));
+                    if (i != parts.size() - 1) System.out.print(" ");
                 }
                 System.out.println();
                 continue;
@@ -45,9 +46,9 @@ public class Main {
 
             // ================= TYPE =================
             if (command.equals("type")) {
-                if (parts.length < 2) continue;
+                if (parts.size() < 2) continue;
 
-                String target = parts[1];
+                String target = parts.get(1);
 
                 if (builtins.contains(target)) {
                     System.out.println(target + " is a shell builtin");
@@ -70,23 +71,20 @@ public class Main {
 
             // ================= CD =================
             if (command.equals("cd")) {
-                if (parts.length < 2) continue;
+                if (parts.size() < 2) continue;
 
-                String target = parts[1];
+                String target = parts.get(1);
                 String newPath;
 
                 String home = System.getenv("HOME");
 
                 if (target.equals("~")) {
                     newPath = home;
-                }
-                else if (target.startsWith("~/")) {
+                } else if (target.startsWith("~/")) {
                     newPath = home + target.substring(1);
-                }
-                else if (target.startsWith("/")) {
+                } else if (target.startsWith("/")) {
                     newPath = target;
-                }
-                else {
+                } else {
                     newPath = resolvePath(currentDir, target);
                 }
 
@@ -97,7 +95,6 @@ public class Main {
                 } else {
                     System.out.println("cd: " + target + ": No such file or directory");
                 }
-
                 continue;
             }
 
@@ -111,12 +108,10 @@ public class Main {
 
             try {
                 List<String> cmd = new ArrayList<>();
-
-                // IMPORTANT: use command name (not full path)
                 cmd.add(command);
 
-                for (int i = 1; i < parts.length; i++) {
-                    cmd.add(parts[i]);
+                for (int i = 1; i < parts.size(); i++) {
+                    cmd.add(parts.get(i));
                 }
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
@@ -133,9 +128,39 @@ public class Main {
         sc.close();
     }
 
+    // ================= SINGLE QUOTE PARSER =================
+    static List<String> parse(String input) {
+        List<String> result = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuote = false;
+
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+
+            if (c == '\'') {
+                inQuote = !inQuote;
+                continue;
+            }
+
+            if (!inQuote && Character.isWhitespace(c)) {
+                if (current.length() > 0) {
+                    result.add(current.toString());
+                    current.setLength(0);
+                }
+            } else {
+                current.append(c);
+            }
+        }
+
+        if (current.length() > 0) {
+            result.add(current.toString());
+        }
+
+        return result;
+    }
+
     // ================= PATH RESOLVER =================
     static String resolvePath(String base, String target) {
-
         String[] baseParts = base.split("/");
         List<String> stack = new ArrayList<>();
 
@@ -146,7 +171,6 @@ public class Main {
         String[] targetParts = target.split("/");
 
         for (String part : targetParts) {
-
             if (part.equals("") || part.equals(".")) continue;
 
             if (part.equals("..")) {
