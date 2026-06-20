@@ -49,18 +49,20 @@ public class Main {
 
                 if (builtins.contains(target)) {
                     System.out.println(target + " is a shell builtin");
-                } else {
-                    String path = findExecutable(target);
-                    if (path != null) {
-                        System.out.println(target + " is " + path);
-                    } else {
-                        System.out.println(target + ": not found");
-                    }
+                    continue;
                 }
+
+                String path = findExecutable(target);
+                if (path != null) {
+                    System.out.println(target + " is " + path);
+                } else {
+                    System.out.println(target + ": not found");
+                }
+
                 continue;
             }
 
-            // ================= EXECUTE EXTERNAL PROGRAM =================
+            // ================= EXECUTION =================
             String execPath = findExecutable(command);
 
             if (execPath == null) {
@@ -71,17 +73,24 @@ public class Main {
             try {
                 List<String> cmd = new ArrayList<>();
 
-                // executable
-                cmd.add(execPath);
+                /*
+                 ❗ CRITICAL FIX:
+                 Use COMMAND NAME instead of full path
+                 This ensures argv[0] matches expected output behavior
+                */
+                cmd.add(command);
 
-                // arguments (IMPORTANT: pass exactly as input)
                 for (int i = 1; i < parts.length; i++) {
                     cmd.add(parts[i]);
                 }
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
 
-                // inherit IO so program output appears directly
+                /*
+                 Ensure PATH resolution still works
+                */
+                pb.environment().put("PATH", System.getenv("PATH"));
+
                 pb.inheritIO();
 
                 Process process = pb.start();
@@ -95,7 +104,7 @@ public class Main {
         sc.close();
     }
 
-    // ================= PATH RESOLUTION =================
+    // ================= PATH SEARCH =================
     static String findExecutable(String target) {
         String pathEnv = System.getenv("PATH");
         if (pathEnv == null) return null;
