@@ -35,7 +35,19 @@ public class Main {
     }
 
     private static final List<Job> jobs = new ArrayList<>();
-    private static int jobCounter = 0;
+
+    // Computes the next job number: 1 if the table is empty, otherwise one
+    // more than the current highest job number in the table. This allows
+    // numbers to be recycled once jobs finish and are removed.
+    private static int nextJobNumber() {
+        int max = 0;
+        for (Job job : jobs) {
+            if (job.jobNumber > max) {
+                max = job.jobNumber;
+            }
+        }
+        return max + 1;
+    }
 
     public static void main(String[] args) throws Exception {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
@@ -163,9 +175,9 @@ public class Main {
             Process process = pb.start();
 
             if (background) {
-                jobCounter++;
-                System.out.println("[" + jobCounter + "] " + process.pid());
-                jobs.add(new Job(jobCounter, process.pid(), commandStr, process));
+                int jobNumber = nextJobNumber();
+                System.out.println("[" + jobNumber + "] " + process.pid());
+                jobs.add(new Job(jobNumber, process.pid(), commandStr, process));
             } else {
                 process.waitFor();
             }
