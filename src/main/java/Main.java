@@ -2,18 +2,23 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Scanner;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class Main {
+    private static Map<Integer, BackgroundJob> backgroundJobs = new LinkedHashMap<>();
+    private static int jobCounter = 1;
 
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
 
         while (true) {
             System.out.print("$ ");
+            System.out.flush();
 
             if (!scanner.hasNextLine()) {
                 break;
@@ -30,17 +35,26 @@ public class Main {
                 break;
             }
 
+            // Check for background job
+            boolean isBackground = line.endsWith("&");
+            if (isBackground) {
+                line = line.substring(0, line.length() - 1).trim();
+            }
+
             // pipeline
             if (line.contains("|")) {
-                executePipeline(line);
+                executePipeline(line, isBackground);
             } else {
-                executeCommand(parseCommand(line));
+                executeCommand(parseCommand(line), isBackground);
             }
+
+            // Check for completed background jobs
+            printCompletedJobs();
         }
     }
 
     // Executes a normal external command
-    private static void executeCommand(List<String> command) {
+    private static void executeCommand(List<String> command, boolean isBackground) {
         try {
             ProcessBuilder pb = new ProcessBuilder(command);
 
@@ -49,7 +63,29 @@ public class Main {
             pb.redirectError(ProcessBuilder.Redirect.INHERIT);
 
             Process process = pb.start();
-            process.waitFor();
+
+            if (isBackground) {
+                long pid = process.pid();
+                int jobNumber = jobCounter++;
+                BackgroundJob job = new BackgroundJob(jobNumber, (int) pid, String.join(" ", command));
+                backgroundJobs.put(jobNumber, job);
+                System.out.println("[" + jobNumber + "] " + pid);
+                System.out.flush();
+
+                // Monitor the process in a separate thread
+                new Thread(() -> {
+                    try {
+                        process.waitFor();
+                        synchronized (Main.class) {
+                            job.status = "Done";
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }).start();
+            } else {
+                process.waitFor();
+            }
 
         } catch (IOException e) {
             System.out.println(command.get(0) + ": command not found");
@@ -59,7 +95,7 @@ public class Main {
     }
 
     // Executes cmd1 | cmd2
-    private static void executePipeline(String line) {
+    private static void executePipeline(String line, boolean isBackground) {
 
         String[] commands = line.split("\\|", 2);
 
@@ -116,16 +152,60 @@ public class Main {
             pipeThread.start();
             outputThread.start();
 
-            p1.waitFor();
-            pipeThread.join();
+            if (isBackground) {
+                long pid = p2.pid();
+                int jobNumber = jobCounter++;
+                BackgroundJob job = new BackgroundJob(jobNumber, (int) pid, line);
+                backgroundJobs.put(jobNumber, job);
+                System.out.println("[" + jobNumber + "] " + pid);
+                System.out.flush();
 
-            p2.waitFor();
-            outputThread.join();
+                // Monitor both processes in a separate thread
+                new Thread(() -> {
+                    try {
+                        p1.waitFor();
+                        pipeThread.join();
+                        p2.waitFor();
+                        outputThread.join();
+                        synchronized (Main.class) {
+                            job.status = "Done";
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }).start();
+            } else {
+                p1.waitFor();
+                pipeThread.join();
+
+                p2.waitFor();
+                outputThread.join();
+            }
 
         } catch (IOException e) {
             System.out.println("command not found");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    // Prints completed background jobs
+    private static synchronized void printCompletedJobs() {
+        List<Integer> completedJobNumbers = new ArrayList<>();
+
+        for (Map.Entry<Integer, BackgroundJob> entry : backgroundJobs.entrySet()) {
+            BackgroundJob job = entry.getValue();
+            if ("Done".equals(job.status) && !job.notified) {
+                System.out.println("[" + job.jobNumber + "]+  Done                 " + job.command);
+                System.out.flush();
+                job.notified = true;
+                completedJobNumbers.add(entry.getKey());
+            }
+        }
+
+        // Remove notified completed jobs
+        for (Integer jobNumber : completedJobNumbers) {
+            backgroundJobs.remove(jobNumber);
         }
     }
 
@@ -148,5 +228,21 @@ public class Main {
         }
 
         return tokens;
+    }
+
+    static class BackgroundJob {
+        int jobNumber;
+        int pid;
+        String command;
+        String status;
+        boolean notified;
+
+        BackgroundJob(int jobNumber, int pid, String command) {
+            this.jobNumber = jobNumber;
+            this.pid = pid;
+            this.command = command;
+            this.status = "Running";
+            this.notified = false;
+        }
     }
 }
