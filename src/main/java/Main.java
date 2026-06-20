@@ -211,14 +211,23 @@ public class Main {
     }
 
     private static void builtinJobs() {
-        for (int i = 0; i < jobs.size(); i++) {
-            Job job = jobs.get(i);
-            boolean isMostRecent = (i == jobs.size() - 1);
-            String marker = isMostRecent ? "+" : "-";
-            String paddedStatus = String.format("%-24s", job.status);
-            System.out.println("[" + job.jobNumber + "]" + marker + "  " + paddedStatus + job.command);
+    int lastIndex = jobs.size() - 1;
+    int secondLastIndex = jobs.size() - 2;
+
+    for (int i = 0; i < jobs.size(); i++) {
+        Job job = jobs.get(i);
+        String marker;
+        if (i == lastIndex) {
+            marker = "+";
+        } else if (i == secondLastIndex) {
+            marker = "-";
+        } else {
+            marker = " ";
         }
+        String paddedStatus = String.format("%-24s", job.status);
+        System.out.println("[" + job.jobNumber + "]" + marker + "  " + paddedStatus + job.command);
     }
+}
 
     private static void builtinCd(List<String> tokens) {
         // Resolve HOME from the environment, not Java's user.home system
